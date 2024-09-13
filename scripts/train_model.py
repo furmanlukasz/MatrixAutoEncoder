@@ -130,6 +130,17 @@ def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, c
     plt.tight_layout()
     return fig
 
+def compute_batch_epsilon(batch, percentile=95):
+    with torch.no_grad():
+        batch_flat = batch.view(batch.size(0), -1)
+        norm = torch.norm(batch_flat, p=2, dim=1, keepdim=True)
+        normalized_batch = batch_flat / norm
+        cosine_sim = torch.mm(normalized_batch, normalized_batch.t())
+        cosine_sim = cosine_sim.clamp(-1 + 1e-7, 1 - 1e-7)
+        angular_distances = torch.acos(cosine_sim)
+        epsilon = torch.quantile(angular_distances, q=percentile/100)
+    return epsilon.item()
+
 def main():
     print("\n🚀 Welcome to the EEG Model Trainer! 👩‍💻👨‍💻\n")
 
@@ -185,9 +196,13 @@ def main():
     # Model parameters
     n_channels = x_train.shape[1]
     hidden_size = args['hidden_size']
+    percentile = args.get('percentile', 90)
+    initial_epsilon = np.pi / 8
+    alpha = 0.05  # Smoothing factor for epsilon updates
 
     # Initialize model
-    model = ConvLSTMEEGAutoencoder(n_channels=n_channels, hidden_size=hidden_size).to(device)
+    model = ConvLSTMEEGAutoencoder(n_channels=n_channels, hidden_size=hidden_size, 
+                                   initial_epsilon=initial_epsilon, alpha=alpha).to(device)
 
     # Disable thresholding
     model.use_threshold = False
@@ -208,7 +223,6 @@ def main():
 
     # Training loop
     num_epochs = args['num_epochs']
-    epsilon = args['epsilon']
 
     print(f"🏋️ Starting training for {num_epochs} epochs...")
     for epoch in tqdm(range(num_epochs), desc="Training progress"):
@@ -219,8 +233,14 @@ def main():
             mask = mask.to(device)
             optimizer.zero_grad()
             
+            # Compute new epsilon for this batch
+            new_epsilon = compute_batch_epsilon(batch, percentile)
+            
+            # Update model's epsilon (smoothed update)
+            model.update_epsilon(new_epsilon)
+            
             # Forward pass
-            reconstructed, recurrence_matrix = model(batch, epsilon)
+            reconstructed, recurrence_matrix = model(batch)
             
             # Apply mask to handle padding
             masked_reconstructed = reconstructed * mask
@@ -241,7 +261,7 @@ def main():
                         "train_loss": loss.item(),
                         "epoch": epoch,
                         "batch": batch_idx,
-                        "epsilon": epsilon
+                        "epsilon": model.epsilon.item()
                     })
 
                     # Create and log visualization
@@ -256,10 +276,10 @@ def main():
                     print(f"⚠️ Warning: Failed to log to wandb: {e}")
 
         avg_train_loss = train_loss / len(train_loader)
-        tqdm.write(f'Epoch [{epoch+1}/{num_epochs}], Loss: {avg_train_loss:.4f}, Epsilon: {epsilon:.4f}')
+        tqdm.write(f'Epoch [{epoch+1}/{num_epochs}], Loss: {avg_train_loss:.4f}, Epsilon: {model.epsilon.item():.4f}')
         if 'WANDB_DISABLED' not in os.environ:
             try:
-                wandb.log({"avg_train_loss": avg_train_loss, "epoch": epoch, "epsilon": epsilon})
+                wandb.log({"avg_train_loss": avg_train_loss, "epoch": epoch, "epsilon": model.epsilon.item()})
             except Exception as e:
                 print(f"⚠️ Warning: Failed to log average loss to wandb: {e}")
 

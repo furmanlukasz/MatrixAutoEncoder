@@ -111,7 +111,7 @@ def main():
 
     # Apply UMAP to reduce dimensions to 3D
     print("🔬 Applying UMAP dimensionality reduction...")
-    reducer = umap.UMAP(n_components=3, random_state=42, n_neighbors=30, min_dist=0.7)
+    reducer = umap.UMAP(n_components=3)
     embedding = reducer.fit_transform(latent_representations)
     print("✅ UMAP embedding shape:", embedding.shape)
 

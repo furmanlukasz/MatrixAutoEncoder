@@ -79,40 +79,40 @@ class ConvLSTMEEGDecoder(nn.Module):
         return reconstructed
 
 class ConvLSTMEEGAutoencoder(nn.Module):
-    def __init__(self, n_channels, hidden_size):
+    def __init__(self, n_channels, hidden_size, initial_epsilon=np.pi/4, alpha=0.1):
         super(ConvLSTMEEGAutoencoder, self).__init__()
         self.encoder = ConvLSTMEEGEncoder(n_channels, hidden_size)
         self.decoder = ConvLSTMEEGDecoder(n_channels, hidden_size)
-        self.use_threshold = True  # Add this flag
+        self.epsilon = nn.Parameter(torch.tensor(initial_epsilon), requires_grad=False)
+        self.alpha = alpha  # Smoothing factor for epsilon updates
+        self.use_threshold = True
 
-    def forward(self, x, epsilon=None):
+    def forward(self, x):
         lstm_out = self.encoder(x)
-        recurrence_matrix = self.compute_recurrence_matrix(lstm_out, epsilon)
+        recurrence_matrix = self.compute_recurrence_matrix(lstm_out)
         reconstructed = self.decoder(lstm_out)
         return reconstructed, recurrence_matrix
 
-    def compute_recurrence_matrix(self, lstm_out, epsilon=None):
+    def compute_recurrence_matrix(self, lstm_out):
         batch_size, seq_len, hidden_size = lstm_out.size()
         recurrence_matrices = []
         for i in range(batch_size):
-            sample_lstm_out = lstm_out[i]  # Shape: (seq_len, hidden_size)
-            # Normalize the vectors
+            sample_lstm_out = lstm_out[i]
             norm = sample_lstm_out.norm(dim=1, keepdim=True)
             normalized_vectors = sample_lstm_out / norm
-            # Compute cosine similarity matrix
             cosine_similarity = torch.mm(normalized_vectors, normalized_vectors.t())
-            # Clamp values to the valid range of arccos to avoid numerical errors
             cosine_similarity = cosine_similarity.clamp(-1 + 1e-7, 1 - 1e-7)
-            # Compute angular distance matrix
             angular_distance = torch.acos(cosine_similarity)
             
-            if self.use_threshold and epsilon is not None:
-                # Apply threshold to create binary recurrence matrix
-                recurrence_matrix = (angular_distance <= epsilon).float()
+            if self.use_threshold:
+                recurrence_matrix = (angular_distance <= self.epsilon).float()
             else:
-                # Use the full distance information
                 recurrence_matrix = angular_distance
             
             recurrence_matrices.append(recurrence_matrix)
         recurrence_matrices = torch.stack(recurrence_matrices)
         return recurrence_matrices
+
+    def update_epsilon(self, new_epsilon):
+        with torch.no_grad():
+            self.epsilon.data = self.alpha * new_epsilon + (1 - self.alpha) * self.epsilon.data
