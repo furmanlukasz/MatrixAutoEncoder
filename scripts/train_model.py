@@ -31,7 +31,7 @@ def parse_args():
         'chunk_duration': 5.0,
         'hidden_size': 64,
         'num_epochs': 90,
-        'epsilon': np.pi / 4
+        'epsilon': np.pi / 8 
     }
 
     for arg in sys.argv[1:]:

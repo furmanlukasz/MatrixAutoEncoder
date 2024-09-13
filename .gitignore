@@ -1,6 +1,7 @@
 models
 results
 data
+wandb
 *.pth
 *.fif
 *.pkl
