@@ -30,15 +30,16 @@ def parse_args():
         'batch_size': 64,
         'chunk_duration': 5.0,
         'hidden_size': 64,
-        'num_epochs': 200,
-        'epsilon': np.pi / 4
+        'num_epochs': 50,
+        'epsilon': np.pi / 16,
+        'complexity': 0  # Add this line
     }
 
     for arg in sys.argv[1:]:
         if '=' in arg:
             key, value = arg.split('=')
             if key in args:
-                if key in ['n_subjects_per_group', 'batch_size', 'hidden_size', 'num_epochs']:
+                if key in ['n_subjects_per_group', 'batch_size', 'hidden_size', 'num_epochs', 'complexity']:
                     args[key] = int(value)
                 elif key in ['chunk_duration', 'epsilon']:
                     args[key] = float(value)
@@ -196,13 +197,15 @@ def main():
     # Model parameters
     n_channels = x_train.shape[1]
     hidden_size = args['hidden_size']
-    percentile = args.get('percentile', 90)
-    initial_epsilon = np.pi / 8
-    alpha = 0.05  # Smoothing factor for epsilon updates
+    percentile = args.get('percentile', 95)
+    initial_epsilon = args['epsilon']
+    alpha = 0.025  # Smoothing factor for epsilon updates
+    complexity = args['complexity']  # Add this line
 
     # Initialize model
     model = ConvLSTMEEGAutoencoder(n_channels=n_channels, hidden_size=hidden_size, 
-                                   initial_epsilon=initial_epsilon, alpha=alpha).to(device)
+                                   initial_epsilon=initial_epsilon, alpha=alpha,
+                                   complexity=complexity).to(device)  # Add complexity parameter
 
     # Disable thresholding
     model.use_threshold = False

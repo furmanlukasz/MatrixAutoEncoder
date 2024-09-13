@@ -13,12 +13,23 @@ import plotly.graph_objects as go
 import sys
 import os
 from tqdm import tqdm
+import argparse
 
 # Import utility functions
 from utils import chunk_data, extract_phase, EEGDataset, ConvLSTMEEGEncoder
 
 # Disable MNE info messages
 mne.set_log_level('ERROR')
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Visualize latent space with customizable UMAP parameters")
+    parser.add_argument('--n_neighbors', type=int, choices=[5, 10, 15], default=10,
+                        help='Number of neighbors for UMAP (5, 10, or 15)')
+    parser.add_argument('--min_dist', type=float, choices=[0.05, 0.25, 0.5], default=0.25,
+                        help='Minimum distance for UMAP (0.05, 0.25, or 0.5)')
+    parser.add_argument('--metric', type=str, choices=['cosine', 'euclidean', 'correlation'], default='cosine',
+                        help='Metric for UMAP (cosine, euclidean, or correlation)')
+    return parser.parse_args()
 
 def load_data_with_labels(group_dirs, n_subjects_per_group=None, chunk_duration=5.0):
     all_data = []
@@ -52,6 +63,9 @@ def load_data_with_labels(group_dirs, n_subjects_per_group=None, chunk_duration=
 def main():
     print("\n🚀 Welcome to the Latent Space Visualizer! 👩‍💻👨‍💻\n")
 
+    # Parse command-line arguments
+    args = parse_args()
+
     # Set the paths
     data_dir = pathlib.Path('data')
     group_dirs = {
@@ -76,7 +90,7 @@ def main():
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     # Device configuration
-    device = torch.device('mps' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('mps')
     print(f"🖥️ Using device: {device}")
 
     # Model parameters
@@ -111,12 +125,15 @@ def main():
 
     # Apply UMAP to reduce dimensions to 3D
     print("🔬 Applying UMAP dimensionality reduction...")
-    reducer = umap.UMAP(n_components=3)
+    reducer = umap.UMAP(n_components=3, 
+                        n_neighbors=args.n_neighbors, 
+                        min_dist=args.min_dist, 
+                        metric=args.metric)
     embedding = reducer.fit_transform(latent_representations)
     print("✅ UMAP embedding shape:", embedding.shape)
 
     # Save UMAP embeddings to file
-    embedding_file = 'results/umap_embeddings.npy'
+    embedding_file = f'results/umap_embeddings_n{args.n_neighbors}_d{args.min_dist}_{args.metric}.npy'
     np.save(embedding_file, embedding)
     print(f"💾 UMAP embeddings saved to '{embedding_file}'")
 
@@ -149,7 +166,7 @@ def main():
 
     # Update layout
     fig.update_layout(
-        title='3D UMAP Projection of Latent Space',
+        title=f'3D UMAP Projection of Latent Space (n_neighbors={args.n_neighbors}, min_dist={args.min_dist}, metric={args.metric})',
         scene=dict(
             xaxis_title='UMAP1',
             yaxis_title='UMAP2',
@@ -165,7 +182,7 @@ def main():
     )
 
     # Save the plot as an HTML file
-    html_file = 'results/latent_space_umap.html'
+    html_file = f'results/latent_space_umap_n{args.n_neighbors}_d{args.min_dist}_{args.metric}.html'
     fig.write_html(html_file)
     print(f"💾 Interactive plot saved to '{html_file}'")
 

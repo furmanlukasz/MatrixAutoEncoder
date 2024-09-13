@@ -8,7 +8,7 @@ generate_rm:
 	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/generate_rm.py
 
 visualize_latent_space:
-	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/visualize_latent_space.py
+	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/visualize_latent_space.py --n_neighbors 10 --min_dist 0.25 --metric cosine
 
 plot_html_cloud:
 	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/plot_html_cloud.py
