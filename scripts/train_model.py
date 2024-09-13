@@ -17,6 +17,7 @@ import wandb
 import matplotlib.pyplot as plt
 from wandb.errors import CommError
 import psutil
+import time
 
 # Import utility functions
 from utils import chunk_data, extract_phase, EEGDataset, ConvLSTMEEGAutoencoder
@@ -30,16 +31,17 @@ def parse_args():
         'batch_size': 64,
         'chunk_duration': 5.0,
         'hidden_size': 64,
-        'num_epochs': 50,
+        'num_epochs': 2000,
         'epsilon': np.pi / 16,
-        'complexity': 0  # Add this line
+        'complexity': 0,  # Add this line
+        'checkpoint_frequency': 200  # Save checkpoint every 10 epochs by default
     }
 
     for arg in sys.argv[1:]:
         if '=' in arg:
             key, value = arg.split('=')
             if key in args:
-                if key in ['n_subjects_per_group', 'batch_size', 'hidden_size', 'num_epochs', 'complexity']:
+                if key in ['n_subjects_per_group', 'batch_size', 'hidden_size', 'num_epochs', 'complexity', 'checkpoint_frequency']:
                     args[key] = int(value)
                 elif key in ['chunk_duration', 'epsilon']:
                     args[key] = float(value)
@@ -141,6 +143,18 @@ def compute_batch_epsilon(batch, percentile=95):
         angular_distances = torch.acos(cosine_sim)
         epsilon = torch.quantile(angular_distances, q=percentile/100)
     return epsilon.item()
+
+def save_checkpoint(model, optimizer, epoch, loss, args, model_path):
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': loss,
+        'args': args
+    }
+    checkpoint_path = f"{model_path[:-4]}_checkpoint_epoch_{epoch}_{time.strftime('%Y%m%d_%H%M%S')}.pth"
+    torch.save(checkpoint, checkpoint_path)
+    print(f"💾 Checkpoint saved to '{checkpoint_path}'")
 
 def main():
     print("\n🚀 Welcome to the EEG Model Trainer! 👩‍💻👨‍💻\n")
@@ -285,6 +299,10 @@ def main():
                 wandb.log({"avg_train_loss": avg_train_loss, "epoch": epoch, "epsilon": model.epsilon.item()})
             except Exception as e:
                 print(f"⚠️ Warning: Failed to log average loss to wandb: {e}")
+
+        # Save checkpoint
+        if (epoch + 1) % args['checkpoint_frequency'] == 0:
+            save_checkpoint(model, optimizer, epoch + 1, avg_train_loss, args, model_path)
 
     # Save the trained model
     os.makedirs('models', exist_ok=True)
