@@ -1,0 +1,14 @@
+models
+results
+data
+*.pth
+*.fif
+*.pkl
+*.pt
+*.npy
+*.csv
+*.txt
+*.log
+*.png
+*.jpg
+*.jpeg
