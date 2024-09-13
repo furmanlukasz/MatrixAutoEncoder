@@ -86,7 +86,7 @@ def main():
     # Load the trained encoder
     print("🧠 Loading trained encoder...")
     encoder = ConvLSTMEEGEncoder(n_channels=n_channels, hidden_size=hidden_size).to(device)
-    model_state_dict = torch.load('models/model copy.pth', map_location=device)
+    model_state_dict = torch.load('models/model.pth', map_location=device)
     encoder_state_dict = {k.replace('encoder.', ''): v for k, v in model_state_dict.items() if 'encoder.' in k}
     encoder.load_state_dict(encoder_state_dict)
     encoder.eval()

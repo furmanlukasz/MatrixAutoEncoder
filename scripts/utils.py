@@ -83,14 +83,15 @@ class ConvLSTMEEGAutoencoder(nn.Module):
         super(ConvLSTMEEGAutoencoder, self).__init__()
         self.encoder = ConvLSTMEEGEncoder(n_channels, hidden_size)
         self.decoder = ConvLSTMEEGDecoder(n_channels, hidden_size)
+        self.use_threshold = True  # Add this flag
 
-    def forward(self, x, epsilon):
+    def forward(self, x, epsilon=None):
         lstm_out = self.encoder(x)
         recurrence_matrix = self.compute_recurrence_matrix(lstm_out, epsilon)
         reconstructed = self.decoder(lstm_out)
         return reconstructed, recurrence_matrix
 
-    def compute_recurrence_matrix(self, lstm_out, epsilon):
+    def compute_recurrence_matrix(self, lstm_out, epsilon=None):
         batch_size, seq_len, hidden_size = lstm_out.size()
         recurrence_matrices = []
         for i in range(batch_size):
@@ -104,8 +105,14 @@ class ConvLSTMEEGAutoencoder(nn.Module):
             cosine_similarity = cosine_similarity.clamp(-1 + 1e-7, 1 - 1e-7)
             # Compute angular distance matrix
             angular_distance = torch.acos(cosine_similarity)
-            # Apply threshold to create binary recurrence matrix
-            recurrence_matrix = (angular_distance <= epsilon).float()
+            
+            if self.use_threshold and epsilon is not None:
+                # Apply threshold to create binary recurrence matrix
+                recurrence_matrix = (angular_distance <= epsilon).float()
+            else:
+                # Use the full distance information
+                recurrence_matrix = angular_distance
+            
             recurrence_matrices.append(recurrence_matrix)
         recurrence_matrices = torch.stack(recurrence_matrices)
         return recurrence_matrices
