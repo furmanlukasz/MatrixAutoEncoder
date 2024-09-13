@@ -31,20 +31,17 @@ def parse_args():
         'chunk_duration': 5.0,
         'hidden_size': 64,
         'num_epochs': 200,
-        'percentile': 95  # Default to 95th percentile
+        'epsilon': np.pi / 4
     }
 
     for arg in sys.argv[1:]:
         if '=' in arg:
             key, value = arg.split('=')
             if key in args:
-                if key in ['n_subjects_per_group', 'batch_size', 'hidden_size', 'num_epochs', 'percentile']:
+                if key in ['n_subjects_per_group', 'batch_size', 'hidden_size', 'num_epochs']:
                     args[key] = int(value)
-                elif key in ['chunk_duration']:
+                elif key in ['chunk_duration', 'epsilon']:
                     args[key] = float(value)
-
-    # Convert percentile to epsilon
-    args['epsilon'] = np.pi / 4 * (args['percentile'] / 95)  # Rough linear scaling
 
     return args
 
@@ -128,25 +125,6 @@ def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, c
     plt.tight_layout()
     return fig
 
-def compute_batch_epsilon(batch, percentile=95):
-    with torch.no_grad():
-        # Flatten the batch
-        batch_flat = batch.view(batch.size(0), -1)
-        
-        # Compute pairwise cosine similarities
-        norm = torch.norm(batch_flat, p=2, dim=1, keepdim=True)
-        normalized_batch = batch_flat / norm
-        cosine_sim = torch.mm(normalized_batch, normalized_batch.t())
-        
-        # Compute angular distances
-        cosine_sim = cosine_sim.clamp(-1 + 1e-7, 1 - 1e-7)
-        angular_distances = torch.acos(cosine_sim)
-        
-        # Compute epsilon as the specified percentile of angular distances
-        epsilon = torch.quantile(angular_distances, q=percentile/100)
-    
-    return epsilon.item()
-
 def main():
     print("\n🚀 Welcome to the EEG Model Trainer! 👩‍💻👨‍💻\n")
 
@@ -222,7 +200,7 @@ def main():
 
     # Training loop
     num_epochs = args['num_epochs']
-    percentile = args.get('percentile', 95)  # Default to 95th percentile if not specified
+    epsilon = args['epsilon']
 
     print(f"🏋️ Starting training for {num_epochs} epochs...")
     for epoch in tqdm(range(num_epochs), desc="Training progress"):
@@ -232,9 +210,6 @@ def main():
             batch = batch.to(device)
             mask = mask.to(device)
             optimizer.zero_grad()
-            
-            # Compute epsilon for this batch
-            epsilon = compute_batch_epsilon(batch, percentile)
             
             # Forward pass
             reconstructed, recurrence_matrix = model(batch, epsilon)
@@ -273,10 +248,10 @@ def main():
                     print(f"⚠️ Warning: Failed to log to wandb: {e}")
 
         avg_train_loss = train_loss / len(train_loader)
-        tqdm.write(f'Epoch [{epoch+1}/{num_epochs}], Loss: {avg_train_loss:.4f}, Last Epsilon: {epsilon:.4f}')
+        tqdm.write(f'Epoch [{epoch+1}/{num_epochs}], Loss: {avg_train_loss:.4f}, Epsilon: {epsilon:.4f}')
         if 'WANDB_DISABLED' not in os.environ:
             try:
-                wandb.log({"avg_train_loss": avg_train_loss, "epoch": epoch, "last_epsilon": epsilon})
+                wandb.log({"avg_train_loss": avg_train_loss, "epoch": epoch, "epsilon": epsilon})
             except Exception as e:
                 print(f"⚠️ Warning: Failed to log average loss to wandb: {e}")
 
