@@ -68,7 +68,7 @@ def load_data(group_folders, n_subjects_per_group, chunk_duration=5.0, filter_lo
             subject_folders = [f for f in group.glob('*') if f.is_dir()]
             subject_folders = subject_folders[:n_subjects_per_group]
             for subject in subject_folders:
-                files = [f for f in subject.glob('**/*_good_*_eeg.fif') if not f.name.startswith('._')]
+                files = list(subject.glob('**/*_good_*_eeg.fif'))
                 for file in files:
                     raw = mne.io.read_raw_fif(file, preload=True, verbose=False)
                     raw = raw.filter(l_freq=filter_low, h_freq=filter_high)

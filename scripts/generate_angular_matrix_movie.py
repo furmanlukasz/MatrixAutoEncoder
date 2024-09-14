@@ -12,9 +12,6 @@ import torch
 from tqdm import tqdm
 import argparse
 import subprocess
-import pywt
-from skimage.filters import gabor
-from skimage import img_as_float
 
 def select_group():
     groups = ['AD', 'HID', 'MCI']
@@ -73,77 +70,22 @@ def generate_angular_matrices(raw, model, window_duration, step_size, device):
     
     return angular_matrices, total_duration
 
-def dwt_analysis(angular_matrix):
-    coeffs2 = pywt.dwt2(angular_matrix, 'haar')
-    LL, (LH, HL, HH) = coeffs2
-    
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    axes[0, 0].imshow(LL, cmap='gray')
-    axes[0, 0].set_title('Approximation (LL)')
-    axes[0, 1].imshow(LH, cmap='gray')
-    axes[0, 1].set_title('Horizontal Details (LH)')
-    axes[1, 0].imshow(HL, cmap='gray')
-    axes[1, 0].set_title('Vertical Details (HL)')
-    axes[1, 1].imshow(HH, cmap='gray')
-    axes[1, 1].set_title('Diagonal Details (HH)')
-    plt.tight_layout()
-
-def cwt_analysis(angular_matrix):
-    signal = np.mean(angular_matrix, axis=0)
-    widths = np.arange(1, 31)
-    cwt_matrix, freqs = pywt.cwt(signal, widths, 'gaus1')
-    
-    plt.imshow(cwt_matrix, extent=[0, len(signal), widths[-1], widths[0]], cmap='PRGn', aspect='auto')
-    plt.title('Continuous Wavelet Transform')
-    plt.xlabel('Time')
-    plt.ylabel('Scale')
-    plt.colorbar()
-
-def texture_analysis(angular_matrix):
-    # Convert to float
-    image = img_as_float(angular_matrix)
-    
-    # Apply Gabor filter
-    filt_real, filt_imag = gabor(image, frequency=0.6)
-    
-    # Compute the magnitude
-    magnitude = np.sqrt(filt_real**2 + filt_imag**2)
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-    ax1.imshow(image, cmap='gray')
-    ax1.set_title('Original Image')
-    ax1.axis('off')
-    
-    ax2.imshow(magnitude, cmap='hot')
-    ax2.set_title('Gabor Magnitude')
-    ax2.axis('off')
-    
-    plt.tight_layout()
-
-def create_movie(angular_matrices, output_file, fps, time_dilation, total_duration, analysis_method):
+def create_movie(angular_matrices, output_file, fps, time_dilation, total_duration):
     plt.figure(figsize=(10, 8))
     
     for i, matrix in enumerate(tqdm(angular_matrices, desc="🎬 Creating movie frames")):
         plt.clf()
-        
-        if analysis_method == '1':
-            plt.imshow(matrix, cmap='viridis', aspect='equal')
-            plt.colorbar(label='Angular Distance')
-            real_time = i / len(angular_matrices) * total_duration
-            plt.title(f"Angular Distance Matrix\nTime: {real_time:.2f}s, Dilation: {time_dilation}x")
-            plt.xlabel("Encoded Sequence Index")
-            plt.ylabel("Encoded Sequence Index")
-        elif analysis_method == '2':
-            dwt_analysis(matrix)
-        elif analysis_method == '3':
-            cwt_analysis(matrix)
-        elif analysis_method == '4':
-            texture_analysis(matrix)
+        plt.imshow(matrix, cmap='viridis', aspect='equal')
+        plt.colorbar(label='Angular Distance')
+        real_time = i / len(angular_matrices) * total_duration
+        plt.title(f"Angular Distance Matrix\nTime: {real_time:.2f}s, Dilation: {time_dilation}x")
+        plt.xlabel("Encoded Sequence Index")
+        plt.ylabel("Encoded Sequence Index")
         
         plt.savefig(f'temp_frame_{i:04d}.png')
-        plt.close()
     
     print("🎥 Encoding video...")
+    # Calculate the frame rate to match the original duration
     effective_fps = len(angular_matrices) / total_duration * time_dilation
     ffmpeg_cmd = [
         'ffmpeg', '-y', '-framerate', str(effective_fps), 
@@ -173,7 +115,7 @@ def main():
     print(f"\n📊 Loading and preprocessing data for {subject_path.name}...")
     raw = load_and_preprocess_data(subject_path)
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('mps' if torch.backends.mps.is_available() else 'cuda')
     print(f"🖥️ Using device: {device}")
     
     n_channels = len(raw.ch_names)
@@ -182,27 +124,16 @@ def main():
     print("🧠 Loading trained model...")
     model = ConvLSTMEEGAutoencoder(n_channels=n_channels, hidden_size=hidden_size).to(device)
     model.load_state_dict(torch.load('models/model.pth', map_location=device))
+    model.use_threshold = False
     model.eval()
     
     print(f"🔍 Parameters: Window={args.window}s, Step={args.step}s, Dilation={args.dilation}x")
     print("🔄 Generating angular matrices...")
     angular_matrices, total_duration = generate_angular_matrices(raw, model, args.window, args.step, device)
     
-    print("\n📊 Choose analysis method:")
-    print("1. Original Angular Distance Matrix")
-    print("2. Discrete Wavelet Transform (DWT)")
-    print("3. Continuous Wavelet Transform (CWT)")
-    print("4. Texture Analysis (Gabor Filter)")
-    
-    while True:
-        choice = input("Enter your choice (1-4): ")
-        if choice in ['1', '2', '3', '4']:
-            break
-        print("❌ Invalid choice. Please try again.")
-    
-    output_file = f'results/angular_matrix_movie_{group}_{subject_path.name}_method{choice}.mp4'
+    output_file = f'results/angular_matrix_movie_{group}_{subject_path.name}.mp4'
     print(f"🎬 Creating movie: {output_file}")
-    create_movie(angular_matrices, output_file, len(angular_matrices)/total_duration, args.dilation, total_duration, choice)
+    create_movie(angular_matrices, output_file, len(angular_matrices)/total_duration, args.dilation, total_duration)
     
     print("\n🎉 Movie creation complete! 🎉")
 
