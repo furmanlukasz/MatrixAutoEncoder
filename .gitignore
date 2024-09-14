@@ -12,6 +12,7 @@ data/MCI/*
 !data/HID/.gitkeep
 !data/MCI/.gitkeep
 
+
 # Keep other ignore rules
 wandb
 *__pycache__
@@ -23,7 +24,6 @@ wandb
 *.csv
 *.txt
 *.log
-*.png
 *.jpg
 *.jpeg
 *.DS_Store
