@@ -6,36 +6,49 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import pathlib
 from mne.preprocessing import compute_current_source_density
-from scipy.signal import hilbert
 from sklearn.model_selection import train_test_split
 import torch.nn as nn
-import torch.nn.functional as F
 import sys
 import os
 from tqdm import tqdm
 import wandb
 import matplotlib.pyplot as plt
-from wandb.errors import CommError
 import psutil
 import time
 from dotenv import load_dotenv
+from torch.cuda.amp import GradScaler, autocast
+from multiprocessing import Pool, cpu_count
 
 # Import utility functions
-from utils import chunk_data, extract_phase, EEGDataset, ConvLSTMEEGAutoencoder
+from utils import chunk_data, extract_phase, ConvLSTMEEGAutoencoder
+
+class EEGDataset(Dataset):
+    def __init__(self, file_paths, transform=None):
+        self.file_paths = file_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.file_paths)
+
+    def __getitem__(self, idx):
+        data = np.load(self.file_paths[idx])
+        if self.transform:
+            data = self.transform(data)
+        return torch.tensor(data, dtype=torch.float32)
 
 # Disable MNE info messages
 mne.set_log_level('ERROR')
 
 def parse_args():
     args = {
-        'n_subjects_per_group': 10,
+        'n_subjects_per_group': 100,
         'batch_size': 64,
         'chunk_duration': 5.0,
         'hidden_size': 64,
-        'num_epochs': 100,
+        'num_epochs': 6000,
         'epsilon': np.pi / 16,
         'complexity': 0,
-        'checkpoint_frequency': 200,
+        'checkpoint_frequency': 50,
         'filter_low': 3.0,
         'filter_high': 40.0,
         'use_threshold': False,
@@ -58,29 +71,52 @@ def print_memory_usage():
     print(f"GPU Memory Usage: {gpu_memory:.2f} MB")
     print(f"RAM Usage: {ram_memory:.2f} MB")
 
-def load_data(group_folders, n_subjects_per_group, chunk_duration=5.0, filter_low=3.0, filter_high=40.0):
-    preprocessed_data = []
-    total_subjects = n_subjects_per_group * len(group_folders)
+def preprocess_subject(args):
+    subject, group_name, output_dir, chunk_duration, filter_low, filter_high = args
+    sfreq = None
+    file_paths = []
+    files = [f for f in subject.glob('**/*_good_*_eeg.fif') if not f.name.startswith('._')]
+    for file in files:
+        try:
+            raw = mne.io.read_raw_fif(file, preload=True, verbose=False)
+            raw = raw.filter(l_freq=filter_low, h_freq=filter_high, n_jobs=1)
+            raw = compute_current_source_density(raw)
+            data = raw.get_data()
+            sfreq = raw.info['sfreq']
+            chunks = chunk_data(data, sfreq, chunk_duration=chunk_duration)
+            for i, chunk in enumerate(chunks):
+                phase_chunk = extract_phase(chunk)
+                file_name = f"{group_name}_{subject.name}_{file.stem}_{i}.npy"
+                file_path = os.path.join(output_dir, file_name)
+                np.save(file_path, phase_chunk)
+                file_paths.append(file_path)
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to process file {file}: {e}")
+    return file_paths, sfreq
+
+def preprocess_and_save_data(group_folders, n_subjects_per_group, output_dir, chunk_duration=5.0, filter_low=3.0, filter_high=40.0):
+    os.makedirs(output_dir, exist_ok=True)
+    all_file_paths = []
     sfreq = None
 
-    with tqdm(total=total_subjects, desc="Loading subjects") as pbar:
-        for group in group_folders:
-            subject_folders = [f for f in group.glob('*') if f.is_dir()]
-            subject_folders = subject_folders[:n_subjects_per_group]
-            for subject in subject_folders:
-                files = [f for f in subject.glob('**/*_good_*_eeg.fif') if not f.name.startswith('._')]
-                for file in files:
-                    raw = mne.io.read_raw_fif(file, preload=True, verbose=False)
-                    raw = raw.filter(l_freq=filter_low, h_freq=filter_high)
-                    raw = compute_current_source_density(raw)
-                    data = raw.get_data()
-                    sfreq = raw.info['sfreq']
-                    chunks = chunk_data(data, sfreq, chunk_duration=chunk_duration)
-                    for chunk in chunks:
-                        phase_chunk = extract_phase(chunk)
-                        preprocessed_data.append(phase_chunk)
+    args_list = []
+    for group in group_folders:
+        group_name = group.name
+        subject_folders = [f for f in group.glob('*') if f.is_dir()]
+        subject_folders = subject_folders[:n_subjects_per_group]
+        for subject in subject_folders:
+            args_list.append((subject, group_name, output_dir, chunk_duration, filter_low, filter_high))
+
+    # Use all available CPU cores
+    num_processes = min(cpu_count(), len(args_list))
+    with Pool(processes=num_processes) as pool:
+        with tqdm(total=len(args_list), desc="Processing subjects") as pbar:
+            for result in pool.imap_unordered(preprocess_subject, args_list):
+                file_paths, sfreq = result
+                all_file_paths.extend(file_paths)
                 pbar.update(1)
-    return np.stack(preprocessed_data), sfreq
+
+    return all_file_paths, sfreq
 
 def load_or_initialize_model(model, model_path):
     if os.path.exists(model_path):
@@ -104,14 +140,12 @@ def count_trainable_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, channel=0, sfreq=250):
-    fig = plt.figure(figsize=(20, 10))  # Increased figure width
+    fig = plt.figure(figsize=(20, 10))
     gs = fig.add_gridspec(2, 3, width_ratios=[2, 1, 1], height_ratios=[1, 1])
 
-    # Calculate time values
     n_samples = original.shape[1]
     time = np.arange(n_samples) / sfreq
 
-    # Plot angular distance matrix
     ax1 = fig.add_subplot(gs[:, 0])
     recurrence_matrix = recurrence_matrix.detach().cpu().numpy()
     if recurrence_matrix.ndim == 1:
@@ -124,20 +158,18 @@ def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, c
     ax1.set_title('Encoded Phase Similarity Matrix\nAngular Distances in Latent Space')
     ax1.set_xlabel('Encoded Sequence')
     ax1.set_ylabel('Encoded Sequence')
-    ax1.set_xticks([])  # Remove x-axis ticks
-    ax1.set_yticks([])  # Remove y-axis ticks
+    ax1.set_xticks([])
+    ax1.set_yticks([])
     cbar = plt.colorbar(im, ax=ax1)
     cbar.set_label('Angular Distance')
 
-    # Plot reconstructed sample
-    ax2 = fig.add_subplot(gs[0, 1:])  # Span two columns
+    ax2 = fig.add_subplot(gs[0, 1:])
     ax2.plot(time, reconstructed[channel].detach().cpu().numpy())
     ax2.set_title('Reconstructed Signal')
     ax2.set_xlabel('Time (s)')
     ax2.set_ylabel('Amplitude')
 
-    # Plot original sample
-    ax3 = fig.add_subplot(gs[1, 1:])  # Span two columns
+    ax3 = fig.add_subplot(gs[1, 1:])
     ax3.plot(time, original[channel].detach().cpu().numpy())
     ax3.set_title('Original Signal')
     ax3.set_xlabel('Time (s)')
@@ -176,13 +208,13 @@ def main():
     load_dotenv()
 
     # Initialize wandb
-    wandb_api_key = os.getenv('WANDB_API_KEY')
+    wandb_api_key = "a32849d94af9c711d39d425741579db87e1f192c"
     if wandb_api_key:
         wandb.login(key=wandb_api_key)
         try:
             wandb.init(project="eeg-autoencoder")
-        except UnicodeDecodeError:
-            print("⚠️ Warning: Encountered UnicodeDecodeError during wandb initialization.")
+        except Exception as e:
+            print(f"⚠️ Warning: Encountered an error during wandb initialization: {e}")
             print("Continuing without wandb logging.")
             os.environ['WANDB_DISABLED'] = 'true'
     else:
@@ -191,10 +223,10 @@ def main():
 
     args = parse_args()
     if 'WANDB_DISABLED' not in os.environ:
-        wandb.config.update(args)  # Log hyperparameters
+        wandb.config.update(args)
 
     # Set the paths
-    data_dir = pathlib.Path('data')
+    data_dir = pathlib.Path('/workspace/MatrixAutoEncoder/data')
     print(f"📂 Data directory: {data_dir}")
     group_dirs = {
         'AD': data_dir / 'AD',
@@ -202,54 +234,75 @@ def main():
         'MCI': data_dir / 'MCI'
     }
 
-    # Load data
-    print(f"📊 Loading and preprocessing data... - setting fmin: {args['filter_low']} - fmax: {args['filter_high']}")
-    all_data, sfreq = load_data(
-        group_folders=[group_dirs['AD'], group_dirs['HID'], group_dirs['MCI']],
-        n_subjects_per_group=args['n_subjects_per_group'],
-        chunk_duration=args['chunk_duration'],
-        filter_low=args['filter_low'],
-        filter_high=args['filter_high']
-    )
+    output_dir = '/workspace/MatrixAutoEncoder/preprocessed_data'
 
-    # Split data into training and testing sets
-    print("🔪 Splitting data into train and test sets...")
-    x_train, x_test = train_test_split(all_data, test_size=0.2, random_state=42)
+    # Check if preprocessed data exists
+    if os.path.exists(output_dir) and len(os.listdir(output_dir)) > 0:
+        print("🗂️ Preprocessed data already exists. Skipping preprocessing.")
+        # Collect all file paths
+        file_paths = [os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.npy')]
+        sfreq = 250  # Set your sampling frequency accordingly
+    else:
+        # Preprocess data and get file paths
+        print(f"📊 Preprocessing and saving data... - setting fmin: {args['filter_low']} - fmax: {args['filter_high']}")
+        file_paths, sfreq = preprocess_and_save_data(
+            group_folders=[group_dirs['AD'], group_dirs['HID'], group_dirs['MCI']],
+            n_subjects_per_group=args['n_subjects_per_group'],
+            output_dir=output_dir,
+            chunk_duration=args['chunk_duration'],
+            filter_low=args['filter_low'],
+            filter_high=args['filter_high']
+        )
+
+    # Split file paths into training and testing
+    train_files, test_files = train_test_split(file_paths, test_size=0.2, random_state=42)
 
     # Create Datasets and DataLoaders
     batch_size = args['batch_size']
-    train_dataset = EEGDataset(x_train)
-    test_dataset = EEGDataset(x_test)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_dataset = EEGDataset(train_files)
+    test_dataset = EEGDataset(test_files)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=min(8, cpu_count()),  # Adjust based on your CPU cores
+        pin_memory=True
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=min(8, cpu_count()),
+        pin_memory=True
+    )
 
     print(f"🧮 Batch size: {batch_size}")
     print_memory_usage()
 
     # Device configuration
-    # device = torch.device('mps' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('mps')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"🖥️ Using device: {device}")
 
     # Model parameters
-    n_channels = x_train.shape[1]
+    n_channels = train_dataset[0].shape[0]
     hidden_size = args['hidden_size']
     percentile = args.get('percentile', 95)
     initial_epsilon = args['epsilon']
-    alpha = 0.025  # Smoothing factor for epsilon updates
-    complexity = args['complexity']  # Add this line
+    alpha = 0.025
+    complexity = args['complexity']
 
     # Initialize model
     model = ConvLSTMEEGAutoencoder(n_channels=n_channels, hidden_size=hidden_size, 
                                    initial_epsilon=initial_epsilon, alpha=alpha,
-                                   complexity=complexity).to(device)  # Add complexity parameter
+                                   complexity=complexity).to(device)
 
     # Disable thresholding
     model.use_threshold = args['use_threshold']
     print(f"🧮 Use threshold: {model.use_threshold}")
 
     # Check for existing model and ask user for fine-tuning
-    model_path = 'models/model.pth'
+    model_path = '/workspace/MatrixAutoEncoder/models/model.pth'
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
     model, is_fine_tuning = load_or_initialize_model(model, model_path)
 
     # Print number of trainable parameters
@@ -259,8 +312,11 @@ def main():
         wandb.log({"num_trainable_parameters": num_params})
 
     # Define loss function and optimizer
-    criterion = nn.MSELoss()
+    criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    # Initialize the GradScaler
+    scaler = GradScaler()
 
     # Training loop
     num_epochs = args['num_epochs']
@@ -269,9 +325,8 @@ def main():
     for epoch in tqdm(range(num_epochs), desc="Training progress"):
         model.train()
         train_loss = 0
-        for batch_idx, (batch, mask) in enumerate(train_loader):
-            batch = batch.to(device)
-            mask = mask.to(device)
+        for batch_idx, batch in enumerate(train_loader):
+            batch = batch.to(device, non_blocking=True)
             optimizer.zero_grad()
             
             # Compute new epsilon for this batch
@@ -280,40 +335,38 @@ def main():
             # Update model's epsilon (smoothed update)
             model.update_epsilon(new_epsilon)
             
-            # Forward pass
-            reconstructed, recurrence_matrix = model(batch)
+            # Forward pass with autocasting
+            with autocast():
+                reconstructed, recurrence_matrix = model(batch)
+                loss = criterion(reconstructed, batch)
             
-            # Apply mask to handle padding
-            masked_reconstructed = reconstructed * mask
-            masked_batch = batch * mask
-            
-            # Compute reconstruction loss
-            loss = criterion(masked_reconstructed, masked_batch)
-            
-            # Backward pass
-            loss.backward()
-            optimizer.step()
+            # Backward pass with scaled gradients
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
             train_loss += loss.item()
 
             # Log to wandb every 128 steps
-            if batch_idx % 128 == 0: # 
-                try:
-                    wandb.log({
-                        "train_loss": loss.item(),
-                        "epoch": epoch,
-                        "batch": batch_idx,
-                        "epsilon": model.epsilon.item()
-                    })
-
-                    # Create and log visualization
+            if batch_idx % 128 == 0:
+                if 'WANDB_DISABLED' not in os.environ:
                     try:
-                        fig = plot_sample_and_reconstruction(batch[0], reconstructed[0], recurrence_matrix[0], sfreq=sfreq)
-                        wandb.log({"sample_visualization": wandb.Image(fig)})
-                        plt.close(fig)
+                        wandb.log({
+                            "train_loss": loss.item(),
+                            "epoch": epoch,
+                            "batch": batch_idx,
+                            "epsilon": model.epsilon.item()
+                        })
+
+                        # Create and log visualization
+                        try:
+                            fig = plot_sample_and_reconstruction(batch[0], reconstructed[0], recurrence_matrix[0], sfreq=sfreq)
+                            wandb.log({"sample_visualization": wandb.Image(fig)})
+                            plt.close(fig)
+                        except Exception as e:
+                            print(f"⚠️ Warning: Failed to create or log visualization: {e}")
                     except Exception as e:
-                        print(f"⚠️ Warning: Failed to create or log visualization: {e}")
-                except Exception as e:
-                    print(f"⚠️ Warning: Failed to log to wandb: {e}")
+                        print(f"⚠️ Warning: Failed to log to wandb: {e}")
 
         avg_train_loss = train_loss / len(train_loader)
         tqdm.write(f'Epoch [{epoch+1}/{num_epochs}], Loss: {avg_train_loss:.4f}, Epsilon: {model.epsilon.item():.4f}')
@@ -328,12 +381,10 @@ def main():
             save_checkpoint(model, optimizer, epoch + 1, avg_train_loss, args, model_path)
 
     # Save the trained model
-    os.makedirs('models', exist_ok=True)
     torch.save(model.state_dict(), model_path)
     print(f"💾 Model saved to '{model_path}'")
 
     print("\n🎉 Training complete! 🎉")
-
 
 if __name__ == '__main__':
     main()
