@@ -66,7 +66,7 @@ The encoder compresses the high-dimensional input $\phi^{(i)}$ into a lower-dime
 1. **Convolutional Layers**: Spatial features across all electrodes were captured:
 
    ``` math
-   \mathbf{h}_{\text{conv}}^{(i)} = f_{\text{conv}}\left( \phi^{(i)} \right), \quad \mathbf{h}_{\text{conv}}^{(i)} \in \mathbb{R}^{F \times T}
+   \mathbf{h}_{\text{conv}}^{(i)} = f_{\text{conv}}\left( \phi^{(i)} \right), \quad \mathbf{h}_{\text{conv}}^{(i)} \in \mathbb{R}^{F \times T},
    ```
 
    where $F$ denotes the number of feature maps.
