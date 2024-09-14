@@ -65,17 +65,18 @@ The encoder compresses the high-dimensional input $\phi^{(i)}$ into a lower-dime
 
 1. **Convolutional Layers**: Spatial features across all electrodes were captured:
 
-   $$
-   \mathbf{h}_{\text{conv}}^{(i)} = f_{\text{conv}}\left( \phi^{(i)} \right), \quad \mathbf{h}_{\text{conv}}^{(i)} \in \mathbb{R}^{F \times T},
-   $$
+
+   \mathbf{h}_{\text{conv}}^{(i)} = f_{\text{conv}}\left( \phi^{(i)} \right), \quad \mathbf{h}_{\text{conv}}^{(i)} \in \mathbb{R}^{F \times T}
+
 
    where $F$ denotes the number of feature maps.
 
 2. **Long Short-Term Memory (LSTM) Layer**: Temporal dependencies in the data were modeled:
 
    $$
-   \mathbf{h}_{\text{lstm}}^{(i)} = f_{\text{lstm}}\left( \mathbf{h}_{\text{conv}}^{(i)} \right), \quad \mathbf{h}_{\text{lstm}}^{(i)} \in \mathbb{R}^{T' \times H},
-   $$
+   \mathbf{h}_{\text{lstm}}^{(i)} = f_{\text{lstm}}\left( \mathbf{h}_{\text{conv}}^{(i)} \right), \quad \mathbf{h}_{\text{lstm}}^{(i)} \in \mathbb{R}^{T' \times H}
+   $$,
+   
 
    where $H$ is the hidden size of the LSTM layer, and $T'$ represents the length of the encoded sequence, which may differ from $T$ due to downsampling or other transformations within the network.
 
