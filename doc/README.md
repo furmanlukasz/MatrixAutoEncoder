@@ -34,21 +34,21 @@ EEG data were recorded from $N$ subjects, each comprising $C$ channels and $T$ t
 
 1. **Bandpass Filtering**: A bandpass filter was applied to remove low-frequency drifts and high-frequency noise:
 
-   $$
+   ``` math
    \mathbf{x}^{(i)}_{\text{filtered}} = \text{Bandpass}(\mathbf{x}^{(i)}).
-   $$
+   ```
 
 2. **Laplacian Referencing**: To enhance spatial resolution and minimize volume conduction effects, a surface Laplacian transformation was applied:
 
-   $$
+   ``` math
    \tilde{\mathbf{x}}^{(i)} = \text{Laplacian}\left( \mathbf{x}^{(i)}_{\text{filtered}} \right).
-   $$
+   ```
 
 3. **Phase Extraction**: The instantaneous phase information was extracted using the Hilbert transform, capturing the timing of neural oscillations:
 
-   $$
+   ``` math
    \phi^{(i)} = \arg\left( \text{Hilbert}\left( \tilde{\mathbf{x}}^{(i)} \right) \right), \quad \phi^{(i)} \in [-\pi, \pi]^{C \times T}.
-   $$
+   ```
 
 4. **Segmentation**: The continuous phase data were segmented into fixed-duration chunks of 5 seconds to capture temporal dynamics while managing computational load.
 
@@ -65,18 +65,17 @@ The encoder compresses the high-dimensional input $\phi^{(i)}$ into a lower-dime
 
 1. **Convolutional Layers**: Spatial features across all electrodes were captured:
 
-
-   \mathbf{h}_{\text{conv}}^{(i)} = f_{\text{conv}}\left( \phi^{(i)} \right), \quad \mathbf{h}_{\text{conv}}^{(i)} \in \mathbb{R}^{F \times T}
-
+   ``` math
+   \mathbf{h}_{\text{conv}}^{(i)} = f_{\text{conv}}\left( \phi^{(i)} \right), \quad \mathbf{h}_{\text{conv}}^{(i)} \in \mathbb{R}^{F \times T},
+   ```
 
    where $F$ denotes the number of feature maps.
 
 2. **Long Short-Term Memory (LSTM) Layer**: Temporal dependencies in the data were modeled:
 
-   $$
-   \mathbf{h}_{\text{lstm}}^{(i)} = f_{\text{lstm}}\left( \mathbf{h}_{\text{conv}}^{(i)} \right), \quad \mathbf{h}_{\text{lstm}}^{(i)} \in \mathbb{R}^{T' \times H}
-   $$,
-   
+   ``` math
+   \mathbf{h}_{\text{lstm}}^{(i)} = f_{\text{lstm}}\left( \mathbf{h}_{\text{conv}}^{(i)} \right), \quad \mathbf{h}_{\text{lstm}}^{(i)} \in \mathbb{R}^{T' \times H},
+   ```
 
    where $H$ is the hidden size of the LSTM layer, and $T'$ represents the length of the encoded sequence, which may differ from $T$ due to downsampling or other transformations within the network.
 
@@ -88,23 +87,23 @@ The decoder reconstructs the input data from the latent representation:
 
 1. **LSTM Layer**:
 
-   $$
+   ``` math
    \hat{\mathbf{h}}_{\text{lstm}}^{(i)} = f_{\text{lstm\_dec}}\left( \mathbf{h}_{\text{lstm}}^{(i)} \right).
-   $$
+   ```
 
 2. **Deconvolutional Layers**:
 
-   $$
+   ``` math
    \hat{\phi}^{(i)} = f_{\text{deconv}}\left( \hat{\mathbf{h}}_{\text{lstm}}^{(i)} \right), \quad \hat{\phi}^{(i)} \in [-\pi, \pi]^{C \times T}.
-   $$
+   ```
 
 #### **Training Objective**
 
 The autoencoder was trained to minimize the reconstruction loss between the input and the reconstructed output:
 
-$$
+``` math
 \mathcal{L}_{\text{recon}} = \frac{1}{N} \sum_{i=1}^N \left\| \phi^{(i)} - \hat{\phi}^{(i)} \right\|_2^2.
-$$
+```
 
 ### **2.4 Angular Distance Matrix Construction**
 
@@ -116,15 +115,15 @@ Figure 2. Angular Distance Matrix for all channels in a chunk of data. Top right
 
 1. **Normalization of Latent Vectors**: Each latent vector at encoded time index $t'$ was normalized to unit length:
 
-   $$
+   ``` math
    \tilde{\mathbf{h}}_{\text{lstm}, t'}^{(i)} = \frac{ \mathbf{h}_{\text{lstm}, t'}^{(i)} }{ \left\| \mathbf{h}_{\text{lstm}, t'}^{(i)} \right\|_2 }.
-   $$
+   ```
 
 2. **Angular Distance Computation**: The angular distance between pairs of latent vectors was calculated without applying a threshold:
 
-   $$
+   ``` math
    D_{t'_1, t'_2}^{(i)} = \alpha_{t'_1, t'_2}^{(i)} = \arccos\left( \tilde{\mathbf{h}}_{\text{lstm}, t'_1}^{(i)} \cdot \tilde{\mathbf{h}}_{\text{lstm}, t'_2}^{(i)} \right).
-   $$
+   ```
 
 **Dimension Considerations**:
 
@@ -158,15 +157,15 @@ Figure 3. Latent Space Visualization
 
 1. **Latent Vector Aggregation**: For each sample, latent vectors were aggregated across the encoded sequence by computing the mean:
 
-   $$
+   ``` math
    \mathbf{h}_{\text{mean}}^{(i)} = \frac{1}{T'} \sum_{t'=1}^{T'} \mathbf{h}_{\text{lstm}, t'}^{(i)}.
-   $$
+   ```
 
 2. **UMAP Projection**: The aggregated latent vectors were projected into a three-dimensional space:
 
-   $$
+   ``` math
    \mathbf{z}^{(i)} = \text{UMAP}\left( \mathbf{h}_{\text{mean}}^{(i)} \right), \quad \mathbf{z}^{(i)} \in \mathbb{R}^3.
-   $$
+   ```
 
 This visualization allows for the inspection of clusters potentially corresponding to different cognitive states, providing insights into underlying neural dynamics without relying on the autoencoder for final classification decisions.
 
@@ -223,9 +222,9 @@ While the autoencoder could be used for classification due to its representation
 
 Traditional recurrence analysis relies on constructing embeddings of time-series data to unfold dynamics in phase space. Time-delay embedding, defined by:
 
-$$
+``` math
 \mathbf{x}_t = [x_t, x_{t - \tau}, x_{t - 2\tau}, \dots, x_{t - (m-1)\tau}],
-$$
+```
 
 introduces hyperparameters $\tau$ (time delay) and $m$ (embedding dimension). Selecting appropriate values is non-trivial and can significantly influence results.
 
