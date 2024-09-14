@@ -126,10 +126,15 @@ def main():
     model_path = select_model()
     encoder = ConvLSTMEEGEncoder(n_channels=n_channels, hidden_size=hidden_size, complexity=complexity).to(device)
     model_state_dict = torch.load(model_path, map_location=device)
-    encoder_state_dict = {k.replace('encoder.', ''): v for k, v in model_state_dict['model_state_dict'].items() if 'encoder.' in k}
+    if 'model_state_dict' in model_state_dict:
+        encoder_state_dict = {k.replace('encoder.', ''): v for k, v in model_state_dict['model_state_dict'].items() if 'encoder.' in k}
+    else:
+        encoder_state_dict = {k.replace('encoder.', ''): v for k, v in model_state_dict.items() if 'encoder.' in k}
     encoder.load_state_dict(encoder_state_dict)
     encoder.eval()
     print(f"✅ Loaded model: {os.path.basename(model_path)}")
+    print(f"📊 Model structure: {'model_state_dict' in model_state_dict}")
+    print(f"🔢 Number of encoder parameters: {len(encoder_state_dict)}")
 
     # Initialize a list to store latent representations
     latent_representations = []

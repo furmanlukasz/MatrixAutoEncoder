@@ -12,3 +12,6 @@ visualize_latent_space:
 
 plot_html_cloud:
 	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/plot_html_cloud.py
+
+visualize_model_architecture:
+	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/visualize_model_architecture.py

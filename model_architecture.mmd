@@ -1,0 +1,17 @@
+graph TD
+  Input[Input]
+  Input --> Encoder
+  Encoder --> Encoder_conv1
+  Encoder_conv1[Encoder_conv1<br>Conv1D<br>256->32]
+  Encoder --> Encoder_relu1
+  Encoder_relu1[Encoder_relu1<br>ReLU]
+  Encoder --> Encoder_lstm
+  Encoder_lstm[Encoder_lstm<br>LSTM<br>32->64]
+  Encoder --> Decoder
+  Decoder --> Decoder_lstm
+  Decoder_lstm[Decoder_lstm<br>LSTM<br>64->32]
+  Decoder --> Decoder_deconv
+  Decoder_deconv[Decoder_deconv<br>ConvTranspose1D<br>32->256]
+  Decoder --> Decoder_output_activation
+  Decoder_output_activation[Decoder_output_activation<br>Tanh]
+  Decoder --> Output[Output]

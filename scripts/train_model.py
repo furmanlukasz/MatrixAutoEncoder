@@ -32,12 +32,14 @@ def parse_args():
         'batch_size': 64,
         'chunk_duration': 5.0,
         'hidden_size': 64,
-        'num_epochs': 2000,
+        'num_epochs': 100,
         'epsilon': np.pi / 16,
         'complexity': 0,
         'checkpoint_frequency': 200,
         'filter_low': 3.0,
-        'filter_high': 40.0
+        'filter_high': 40.0,
+        'use_threshold': False,
+        'wandb_project': "EEG-Autoencoder"
     }
 
     for arg in sys.argv[1:]:
@@ -48,7 +50,6 @@ def parse_args():
                     args[key] = int(value)
                 elif key in ['chunk_duration', 'epsilon', 'filter_low', 'filter_high']:
                     args[key] = float(value)
-
     return args
 
 def print_memory_usage():
@@ -102,38 +103,38 @@ def count_trainable_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, channel=0):
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+    fig = plt.figure(figsize=(15, 10))
+    gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1])
+
+    # Plot recurrence matrix
+    ax1 = fig.add_subplot(gs[:, 0])
+    recurrence_matrix = recurrence_matrix.detach().cpu().numpy()
+    if recurrence_matrix.ndim == 1:
+        size = int(np.sqrt(recurrence_matrix.shape[0]))
+        recurrence_matrix = recurrence_matrix[:size*size].reshape(size, size)
+    elif recurrence_matrix.ndim > 2:
+        recurrence_matrix = recurrence_matrix[0]
     
-    # Main title
-    fig.suptitle(f'Sample and Reconstruction for Channel {channel}')
-    # Plot original sample
-    ax1.plot(original[channel].detach().cpu().numpy())
-    ax1.set_title('Original')
+    im = ax1.imshow(recurrence_matrix, cmap='viridis', aspect='equal')
+    ax1.set_title('Recurrence Matrix')
     ax1.set_xlabel('Time')
-    ax1.set_ylabel('Amplitude')
-    
+    ax1.set_ylabel('Time')
+    plt.colorbar(im, ax=ax1)
+
     # Plot reconstructed sample
+    ax2 = fig.add_subplot(gs[0, 1])
     ax2.plot(reconstructed[channel].detach().cpu().numpy())
     ax2.set_title('Reconstructed')
     ax2.set_xlabel('Time')
     ax2.set_ylabel('Amplitude')
-    
-    # Plot recurrence matrix
-    recurrence_matrix = recurrence_matrix.detach().cpu().numpy()
-    if recurrence_matrix.ndim == 1:
-        # If 1D, reshape to 2D square matrix
-        size = int(np.sqrt(recurrence_matrix.shape[0]))
-        recurrence_matrix = recurrence_matrix[:size*size].reshape(size, size)
-    elif recurrence_matrix.ndim > 2:
-        # If more than 2D, take the first 2D slice
-        recurrence_matrix = recurrence_matrix[0]
-    
-    im = ax3.imshow(recurrence_matrix, cmap='viridis')
-    ax3.set_title('Recurrence Matrix')
+
+    # Plot original sample
+    ax3 = fig.add_subplot(gs[1, 1])
+    ax3.plot(original[channel].detach().cpu().numpy())
+    ax3.set_title('Original')
     ax3.set_xlabel('Time')
-    ax3.set_ylabel('Time')
-    plt.colorbar(im, ax=ax3)
-    
+    ax3.set_ylabel('Amplitude')
+
     plt.tight_layout()
     return fig
 
@@ -170,6 +171,12 @@ def main():
     wandb_api_key = os.getenv('WANDB_API_KEY')
     if wandb_api_key:
         wandb.login(key=wandb_api_key)
+        try:
+            wandb.init(project="eeg-autoencoder")
+        except UnicodeDecodeError:
+            print("⚠️ Warning: Encountered UnicodeDecodeError during wandb initialization.")
+            print("Continuing without wandb logging.")
+            os.environ['WANDB_DISABLED'] = 'true'
     else:
         print("⚠️ Warning: WANDB_API_KEY not found in .env file. Weights & Biases logging will be disabled.")
         os.environ['WANDB_DISABLED'] = 'true'
@@ -188,7 +195,7 @@ def main():
     }
 
     # Load data
-    print("📊 Loading and preprocessing data...")
+    print(f"📊 Loading and preprocessing data... - setting fmin: {args['filter_low']} - fmax: {args['filter_high']}")
     all_data = load_data(
         group_folders=[group_dirs['AD'], group_dirs['HID'], group_dirs['MCI']],
         n_subjects_per_group=args['n_subjects_per_group'],
@@ -230,7 +237,8 @@ def main():
                                    complexity=complexity).to(device)  # Add complexity parameter
 
     # Disable thresholding
-    model.use_threshold = False
+    model.use_threshold = args['use_threshold']
+    print(f"🧮 Use threshold: {model.use_threshold}")
 
     # Check for existing model and ask user for fine-tuning
     model_path = 'models/model.pth'
@@ -279,8 +287,8 @@ def main():
             optimizer.step()
             train_loss += loss.item()
 
-            # Log to wandb every 5 steps
-            if batch_idx % 128 == 0:
+            # Log to wandb every 128 steps
+            if batch_idx % 128 == 0: # 
                 try:
                     wandb.log({
                         "train_loss": loss.item(),
@@ -296,7 +304,6 @@ def main():
                         plt.close(fig)
                     except Exception as e:
                         print(f"⚠️ Warning: Failed to create or log visualization: {e}")
-
                 except Exception as e:
                     print(f"⚠️ Warning: Failed to log to wandb: {e}")
 
