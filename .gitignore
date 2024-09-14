@@ -1,8 +1,10 @@
-models
-results
-data
+models/*
+results/*
+data/AD/*
+data/HID/*
+data/MCI/*
 wandb
-__pycache__
+*__pycache__
 *.pth
 *.fif
 *.pkl
@@ -14,5 +16,5 @@ __pycache__
 *.png
 *.jpg
 *.jpeg
-.DS_Store
-.env
+*.DS_Store
+*.env
