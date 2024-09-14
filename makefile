@@ -15,3 +15,6 @@ plot_html_cloud:
 
 visualize_model_architecture:
 	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/visualize_model_architecture.py
+
+signal_analysis:
+	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/evaluation_tests/signal_analysis.py

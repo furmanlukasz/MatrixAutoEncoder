@@ -1,8 +1,18 @@
+# Ignore everything in these directories
 models/*
 results/*
 data/AD/*
 data/HID/*
 data/MCI/*
+
+# But don't ignore the .gitkeep files
+!models/.gitkeep
+!results/.gitkeep
+!data/AD/.gitkeep
+!data/HID/.gitkeep
+!data/MCI/.gitkeep
+
+# Keep other ignore rules
 wandb
 *__pycache__
 *.pth

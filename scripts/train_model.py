@@ -61,7 +61,8 @@ def print_memory_usage():
 def load_data(group_folders, n_subjects_per_group, chunk_duration=5.0, filter_low=3.0, filter_high=40.0):
     preprocessed_data = []
     total_subjects = n_subjects_per_group * len(group_folders)
-    
+    sfreq = None
+
     with tqdm(total=total_subjects, desc="Loading subjects") as pbar:
         for group in group_folders:
             subject_folders = [f for f in group.glob('*') if f.is_dir()]
@@ -79,7 +80,7 @@ def load_data(group_folders, n_subjects_per_group, chunk_duration=5.0, filter_lo
                         phase_chunk = extract_phase(chunk)
                         preprocessed_data.append(phase_chunk)
                 pbar.update(1)
-    return np.stack(preprocessed_data)
+    return np.stack(preprocessed_data), sfreq
 
 def load_or_initialize_model(model, model_path):
     if os.path.exists(model_path):
@@ -102,11 +103,15 @@ def load_or_initialize_model(model, model_path):
 def count_trainable_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, channel=0):
-    fig = plt.figure(figsize=(15, 10))
-    gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1])
+def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, channel=0, sfreq=250):
+    fig = plt.figure(figsize=(20, 10))  # Increased figure width
+    gs = fig.add_gridspec(2, 3, width_ratios=[2, 1, 1], height_ratios=[1, 1])
 
-    # Plot recurrence matrix
+    # Calculate time values
+    n_samples = original.shape[1]
+    time = np.arange(n_samples) / sfreq
+
+    # Plot angular distance matrix
     ax1 = fig.add_subplot(gs[:, 0])
     recurrence_matrix = recurrence_matrix.detach().cpu().numpy()
     if recurrence_matrix.ndim == 1:
@@ -116,23 +121,26 @@ def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, c
         recurrence_matrix = recurrence_matrix[0]
     
     im = ax1.imshow(recurrence_matrix, cmap='viridis', aspect='equal')
-    ax1.set_title('Recurrence Matrix')
-    ax1.set_xlabel('Time')
-    ax1.set_ylabel('Time')
-    plt.colorbar(im, ax=ax1)
+    ax1.set_title('Encoded Phase Similarity Matrix\nAngular Distances in Latent Space')
+    ax1.set_xlabel('Encoded Sequence')
+    ax1.set_ylabel('Encoded Sequence')
+    ax1.set_xticks([])  # Remove x-axis ticks
+    ax1.set_yticks([])  # Remove y-axis ticks
+    cbar = plt.colorbar(im, ax=ax1)
+    cbar.set_label('Angular Distance')
 
     # Plot reconstructed sample
-    ax2 = fig.add_subplot(gs[0, 1])
-    ax2.plot(reconstructed[channel].detach().cpu().numpy())
-    ax2.set_title('Reconstructed')
-    ax2.set_xlabel('Time')
+    ax2 = fig.add_subplot(gs[0, 1:])  # Span two columns
+    ax2.plot(time, reconstructed[channel].detach().cpu().numpy())
+    ax2.set_title('Reconstructed Signal')
+    ax2.set_xlabel('Time (s)')
     ax2.set_ylabel('Amplitude')
 
     # Plot original sample
-    ax3 = fig.add_subplot(gs[1, 1])
-    ax3.plot(original[channel].detach().cpu().numpy())
-    ax3.set_title('Original')
-    ax3.set_xlabel('Time')
+    ax3 = fig.add_subplot(gs[1, 1:])  # Span two columns
+    ax3.plot(time, original[channel].detach().cpu().numpy())
+    ax3.set_title('Original Signal')
+    ax3.set_xlabel('Time (s)')
     ax3.set_ylabel('Amplitude')
 
     plt.tight_layout()
@@ -196,7 +204,7 @@ def main():
 
     # Load data
     print(f"📊 Loading and preprocessing data... - setting fmin: {args['filter_low']} - fmax: {args['filter_high']}")
-    all_data = load_data(
+    all_data, sfreq = load_data(
         group_folders=[group_dirs['AD'], group_dirs['HID'], group_dirs['MCI']],
         n_subjects_per_group=args['n_subjects_per_group'],
         chunk_duration=args['chunk_duration'],
@@ -299,7 +307,7 @@ def main():
 
                     # Create and log visualization
                     try:
-                        fig = plot_sample_and_reconstruction(batch[0], reconstructed[0], recurrence_matrix[0])
+                        fig = plot_sample_and_reconstruction(batch[0], reconstructed[0], recurrence_matrix[0], sfreq=sfreq)
                         wandb.log({"sample_visualization": wandb.Image(fig)})
                         plt.close(fig)
                     except Exception as e:

@@ -210,7 +210,8 @@ def main():
         width=1024,
         height=1024,
         margin=dict(r=0, b=0, l=0, t=50),
-        template="plotly_dark"
+        # template="plotly_dark"
+        template="plotly_white"
     )
 
     # Save the plot as an HTML file
