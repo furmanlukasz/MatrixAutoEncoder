@@ -16,7 +16,7 @@ Recurrence quantification analysis (RQA) provides a framework for analyzing the 
 
 Alternative embedding methods, such as those based on short-time Fourier transform (STFT) spectrograms, also introduce parameters that influence temporal resolution and frequency content, potentially affecting the analysis. The choice of embedding thus becomes a critical factor that can introduce biases and affect the interpretability of the results.
 
-There is a pressing need in neuroscience for methods that can provide suitable embeddings for multivariate EEG data without the extensive hyperparameter tuning required by traditional approaches. Autoencoders offer a potential solution by learning data-driven embeddings that capture essential features of EEG signals. Despite concerns about the "black box" nature of such models, autoencoders can serve as tools to guide analysis, allowing for the selection of informative signal segments that can be further examined using standard EEG analysis methods.
+Autoencoders offer a potential solution by learning data-driven embeddings that capture essential features of EEG signals. Despite concerns about the "black box" nature of such models, autoencoders can serve as tools to guide analysis, allowing for the selection of informative signal segments that can be further examined using standard EEG analysis methods.
 
 The hypothesis explored in this study is that the latent space learned by an autoencoder can capture essential features of EEG data, and constructing angular distance matrices from this latent space can highlight temporal patterns indicative of different cognitive states. This approach aims to reduce reliance on hyperparameter-dependent embeddings in traditional RQA and to provide a method for informed segment selection in resting-state EEG analysis.
 
@@ -26,7 +26,7 @@ The hypothesis explored in this study is that the latent space learned by an aut
 
 ### **2.1 Participants**
 
-*Placeholder for participant demographics, inclusion criteria, and ethical considerations.*
+*Placeholder for participant demographics, inclusion criteria, and ethical considerations.* - left blank intentionally
 
 ### **2.2 Data Acquisition and Preprocessing**
 
@@ -54,7 +54,10 @@ EEG data were recorded from $N$ subjects, each comprising $C$ channels and $T$ t
 
 ### **2.3 Autoencoder Architecture**
 
-An autoencoder with an encoder-decoder structure was designed to learn compressed, data-driven embeddings of the multichannel EEG phase data, thereby addressing challenges associated with traditional embedding methods in RQA.
+An autoencoder with an encoder-decoder structure was designed to learn compressed, data-driven embeddings of the multichannel EEG phase data.
+![Model Architecture](model.png)
+
+Figure 1. Model Architecture
 
 #### **Encoder**
 
@@ -106,6 +109,10 @@ The autoencoder was trained to minimize the reconstruction loss between the inpu
 
 To capture the temporal dynamics embedded in the learned latent space, angular distance matrices were constructed based on the angular distance between latent vectors.
 
+![Angular Distance Matrix](./s_m_1.png)
+
+Figure 2. Angular Distance Matrix for all channels in a chunk of data. Top right corner shows the reconstruction of the input signal for a single channel.
+
 1. **Normalization of Latent Vectors**: Each latent vector at encoded time index $t'$ was normalized to unit length:
 
    \[
@@ -121,20 +128,32 @@ To capture the temporal dynamics embedded in the learned latent space, angular d
 **Dimension Considerations**:
 
 - The angular distance matrix $D^{(i)} \in [0, \pi]^{T' \times T'}$ represents the pairwise angular distances between latent vectors at different positions in the encoded sequence.
-- It is crucial to recognize that the indices $t'$ correspond to positions in the encoded sequence, which may not have a linear or direct correspondence to the original time indices $t$ due to transformations such as downsampling or temporal convolutions within the encoder.
-- The encoded sequence may compress, expand, or otherwise distort the temporal relationships present in the original data.
+- While the indices $t'$ correspond to positions in the encoded sequence, they often maintain a strong relationship with the original time indices $t$, albeit potentially compressed or expanded.
+- The encoder's architecture (e.g., convolutional and LSTM layers) tends to preserve the temporal order and relative timing of events, but may introduce some non-linear transformations:
+  - Local temporal relationships are generally preserved, allowing for the identification of specific events or patterns in both the original and encoded sequences.
+  - Larger-scale temporal structures may be compressed or expanded, potentially highlighting multi-scale temporal dynamics.
+- The angular distance matrix reveals both local and global temporal patterns:
+  - Diagonal structures often correspond directly to temporal events in the original signal.
+  - Off-diagonal patterns may reveal longer-range temporal dependencies or recurring patterns at different time scales.
+- While not a direct measure of time intervals, the matrix can exhibit scale-free properties and power law relationships, reflecting the multi-scale nature of EEG dynamics.
+- The preservation of temporal structure allows for meaningful interpretation of the matrix in relation to the original time series, but care should be taken when making precise temporal inferences.
 
-**Visualization Adjustments**:
+
+**Visualization Considerations**:
 
 - When plotting $D^{(i)}$, axes should be labeled as "Encoded Sequence Index" to reflect that the indices represent positions in the latent space rather than specific time points.
 - Time labels should be avoided on the axes of the angular distance matrix to prevent implying a direct, linear relationship with the original time scale.
-- A colorbar labeled "Angular Distance" should be included to indicate the meaning of the color scale.
+
 
 The angular distance matrix reflects relationships in the encoded space, providing insights into the temporal similarity of multivariate neural activity as represented by the autoencoder's latent space. By retaining the full distance information without thresholding, a more nuanced analysis of temporal dynamics is possible.
 
 ### **2.5 Latent Space Visualization**
 
 To explore the structure of the latent space and identify potential group differences, UMAP was applied for dimensionality reduction:
+
+![Latent Space Visualization](./latent_space_umap_model_checkpoint.png)
+
+Figure 3. Latent Space Visualization
 
 1. **Latent Vector Aggregation**: For each sample, latent vectors were aggregated across the encoded sequence by computing the mean:
 
@@ -148,13 +167,13 @@ To explore the structure of the latent space and identify potential group differ
    \mathbf{z}^{(i)} = \text{UMAP}\left( \mathbf{h}_{\text{mean}}^{(i)} \right), \quad \mathbf{z}^{(i)} \in \mathbb{R}^3.
    \]
 
-This visualization allows for the inspection of clusters corresponding to different cognitive states, providing insights into underlying neural dynamics without relying on the autoencoder for final classification decisions.
+This visualization allows for the inspection of clusters potentially corresponding to different cognitive states, providing insights into underlying neural dynamics without relying on the autoencoder for final classification decisions.
 
 ---
 
 ## **3. Results**
 
-*Placeholder for presentation of findings, including UMAP visualizations of the latent space, differences in angular distance matrices among groups, and interpretation of temporal patterns.*
+*Placeholder for presentation of findings, including UMAP visualizations of the latent space, differences in angular distance matrices among groups, and interpretation of temporal patterns.* - left blank intentionally
 
 ---
 
@@ -164,38 +183,23 @@ Analyzing resting-state EEG data is fraught with challenges, particularly in con
 
 The approach presented addresses these challenges by utilizing an autoencoder to learn a data-driven embedding from EEG phase data. This method reduces dependence on hyperparameter selection inherent in traditional embeddings, as the autoencoder inherently captures essential features of the data through training.
 
-By constructing angular distance matrices from the latent space without applying a threshold, temporal patterns indicative of different cognitive states are highlighted. These matrices provide detailed information about temporal similarity between latent representations at different positions in the encoded sequence. Retaining full distance information allows for a more nuanced analysis of temporal dynamics, potentially revealing patterns that thresholded recurrence matrices might obscure.
-
-**Interpretation of the Angular Distance Matrix**:
-
-- It is important to note that the time indices in the angular distance matrix correspond to positions in the encoded sequence, not directly to the original input time.
-- The transformations performed by the autoencoder, such as temporal pooling or striding, may alter the relationship between the encoded sequence indices and actual time.
-- Therefore, care must be taken when interpreting the temporal aspects of the angular distance matrix. Direct comparisons of time intervals based on these indices may not reflect actual temporal distances in the original signal.
-
-By acknowledging these considerations, we ensure that the representation and interpretation of the angular distance matrix accurately reflect the transformations inherent in the autoencoder's processing of the data.
-
-The use of autoencoders, despite being considered "black boxes," serves as a tool to guide analysis rather than providing final results. The latent space representations and corresponding angular distance matrices facilitate identification of informative signal segments. These segments can then be subjected to traditional EEG analysis methods, such as power spectral analysis, to validate findings and interpret underlying neural mechanisms.
-
-Visualization of the latent space using UMAP revealed distinct clusters corresponding to different cognitive states, suggesting that the autoencoder effectively captured features relevant for differentiation. This dimensionality reduction aids in interpreting results and provides a means to select specific subjects or segments for further analysis, enhancing robustness and interpretability of the study.
+By constructing angular distance matrices from the latent space without applying a threshold, temporal patterns are highlighted. These matrices provide detailed information about temporal similarity between latent representations at different positions in the encoded sequence. Retaining full distance information allows for a more nuanced analysis of temporal dynamics, potentially revealing patterns that thresholded recurrence matrices might obscure.
 
 ---
 
 ## **5. Conclusion**
 
-This study presented a methodology that integrates autoencoders with multivariate angular distance analysis to highlight temporal patterns in resting-state EEG data. By leveraging the autoencoder's ability to learn data-driven embeddings, the approach addresses challenges associated with traditional embedding methods in RQA, reducing reliance on hyperparameter selection and potential biases. Constructing angular distance matrices from the latent space without thresholding retains full temporal similarity information, revealing patterns indicative of different cognitive states.
+This report presents a methodology that integrates autoencoders with multivariate angular distance analysis to highlight temporal patterns in resting-state EEG data. By leveraging the autoencoder's ability to learn data-driven embeddings, the approach addresses challenges associated with traditional embedding methods in RQA, reducing reliance on hyperparameter selection and potential biases. Constructing angular distance matrices from the latent space without thresholding retains full temporal similarity information, revealing patterns indicative of different cognitive states.
 
 **Important Considerations**:
 
-- The angular distance matrix reflects relationships in the encoded space, and the time indices correspond to positions in the encoded sequence rather than the original time scale.
-- Visualization and interpretation of these matrices require careful consideration of the transformations applied by the autoencoder.
-
-While the autoencoder could be used for classification due to its representation learning, the primary focus is on guiding analysis and enhancing interpretability through standard EEG methods. Future work will involve validating the method on larger datasets, exploring alternative network architectures, and investigating integration of additional neurophysiological measures.
+While the autoencoder could be used for classification due to its representation learning, the primary focus is on guiding analysis and enhancing interpretability through standard EEG methods. 
 
 ---
 
 ## **References**
 
-*Placeholder for references to relevant literature on EEG analysis, autoencoders, recurrence quantification analysis, and dimensionality reduction techniques.*
+*Placeholder for references to relevant literature on EEG analysis, autoencoders, recurrence quantification analysis, and dimensionality reduction techniques.* - left blank intentionally
 
 ---
 

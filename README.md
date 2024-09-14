@@ -30,7 +30,8 @@ data/
 
 ## Model Architecture
 
-[Placeholder for model architecture image]
+<!-- html link image -->
+![Model Architecture](./doc/model.png)
 
 The model architecture consists of convolutional layers followed by LSTM layers to compress the multivariate EEG signal.
 
@@ -40,7 +41,7 @@ The `generateRM` pipeline in the Makefile generates recurrence matrices from the
 
 The recurrence matrices use angular distance instead of Euclidean distance due to the use of phase values. This allows for better representation of the circular nature of phase data.
 
-[Placeholder for recurrence matrix image]
+![Recurrence Matrix](./doc/s_m_1.png)
 
 ## Installation
 
@@ -70,7 +71,7 @@ Use the following make commands to run different parts of the pipeline:
 - `make train_model`: Start the model training process.
 - `make generate_rm`: Generate recurrence matrices from trained model.
 - `make visualize_latent_space`: Visualize the latent space representation.
-- `make plot_html_cloud`: Generate an interactive HTML plot of the latent space.
+- `make plot_html_cloud`: Generate an interactive HTML plot of the latent space representation.
 - `make visualize_model_architecture`: Visualize the model architecture.
 - `make signal_analysis`: Run signal analysis on the data.
 
@@ -79,7 +80,7 @@ Use the following make commands to run different parts of the pipeline:
 
 The latent space visualization creates a 3D point cloud using UMAP, with labels representing different conditions (AD, HID, MCI). This allows you to observe how the model learns to represent the data samples over time.
 
-[Placeholder for latent space visualization image]
+![Latent Space Visualization](./doc/latent_space_umap_model_checkpoint.png)
 
 ## Weights & Biases Integration
 
