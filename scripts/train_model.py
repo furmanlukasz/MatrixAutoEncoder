@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from wandb.errors import CommError
 import psutil
 import time
+from dotenv import load_dotenv
 
 # Import utility functions
 from utils import chunk_data, extract_phase, EEGDataset, ConvLSTMEEGAutoencoder
@@ -33,8 +34,10 @@ def parse_args():
         'hidden_size': 64,
         'num_epochs': 2000,
         'epsilon': np.pi / 16,
-        'complexity': 0,  # Add this line
-        'checkpoint_frequency': 200  # Save checkpoint every 10 epochs by default
+        'complexity': 0,
+        'checkpoint_frequency': 200,
+        'filter_low': 3.0,
+        'filter_high': 40.0
     }
 
     for arg in sys.argv[1:]:
@@ -43,7 +46,7 @@ def parse_args():
             if key in args:
                 if key in ['n_subjects_per_group', 'batch_size', 'hidden_size', 'num_epochs', 'complexity', 'checkpoint_frequency']:
                     args[key] = int(value)
-                elif key in ['chunk_duration', 'epsilon']:
+                elif key in ['chunk_duration', 'epsilon', 'filter_low', 'filter_high']:
                     args[key] = float(value)
 
     return args
@@ -54,7 +57,7 @@ def print_memory_usage():
     print(f"GPU Memory Usage: {gpu_memory:.2f} MB")
     print(f"RAM Usage: {ram_memory:.2f} MB")
 
-def load_data(group_folders, n_subjects_per_group, chunk_duration=5.0):
+def load_data(group_folders, n_subjects_per_group, chunk_duration=5.0, filter_low=3.0, filter_high=40.0):
     preprocessed_data = []
     total_subjects = n_subjects_per_group * len(group_folders)
     
@@ -66,6 +69,7 @@ def load_data(group_folders, n_subjects_per_group, chunk_duration=5.0):
                 files = list(subject.glob('**/*_good_*_eeg.fif'))
                 for file in files:
                     raw = mne.io.read_raw_fif(file, preload=True, verbose=False)
+                    raw = raw.filter(l_freq=filter_low, h_freq=filter_high)
                     raw = compute_current_source_density(raw)
                     data = raw.get_data()
                     sfreq = raw.info['sfreq']
@@ -159,13 +163,15 @@ def save_checkpoint(model, optimizer, epoch, loss, args, model_path):
 def main():
     print("\n🚀 Welcome to the EEG Model Trainer! 👩‍💻👨‍💻\n")
 
+    # Load environment variables
+    load_dotenv()
+
     # Initialize wandb
-    wandb.login(key="a32849d94af9c711d39d425741579db87e1f192c")
-    
-    try:
-        wandb.init(project="EEG-Autoencoder")
-    except UnicodeDecodeError:
-        print("⚠️ Warning: Encountered UnicodeDecodeError during wandb initialization. Some logging features may be limited.")
+    wandb_api_key = os.getenv('WANDB_API_KEY')
+    if wandb_api_key:
+        wandb.login(key=wandb_api_key)
+    else:
+        print("⚠️ Warning: WANDB_API_KEY not found in .env file. Weights & Biases logging will be disabled.")
         os.environ['WANDB_DISABLED'] = 'true'
 
     args = parse_args()
@@ -186,7 +192,9 @@ def main():
     all_data = load_data(
         group_folders=[group_dirs['AD'], group_dirs['HID'], group_dirs['MCI']],
         n_subjects_per_group=args['n_subjects_per_group'],
-        chunk_duration=args['chunk_duration']
+        chunk_duration=args['chunk_duration'],
+        filter_low=args['filter_low'],
+        filter_high=args['filter_high']
     )
 
     # Split data into training and testing sets

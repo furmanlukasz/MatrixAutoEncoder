@@ -14,6 +14,7 @@ import sys
 import os
 from tqdm import tqdm
 import argparse
+import glob
 
 # Import utility functions
 from utils import chunk_data, extract_phase, EEGDataset, ConvLSTMEEGEncoder
@@ -29,6 +30,8 @@ def parse_args():
                         help='Minimum distance for UMAP (0.05, 0.25, or 0.5)')
     parser.add_argument('--metric', type=str, choices=['cosine', 'euclidean', 'correlation'], default='cosine',
                         help='Metric for UMAP (cosine, euclidean, or correlation)')
+    parser.add_argument('--complexity', type=int, choices=[0, 1, 2], default=0,
+                        help='Model complexity (0, 1, or 2)')
     return parser.parse_args()
 
 def load_data_with_labels(group_dirs, n_subjects_per_group=None, chunk_duration=5.0):
@@ -59,6 +62,26 @@ def load_data_with_labels(group_dirs, n_subjects_per_group=None, chunk_duration=
                         all_labels.append(label_mapping[group_name])
                 pbar.update(1)
     return np.stack(all_data), np.array(all_labels)
+
+def select_model():
+    models = glob.glob('models/*.pth')
+    if not models:
+        print("❌ No models found in the 'models' directory.")
+        sys.exit(1)
+    
+    print("📚 Available models:")
+    for i, model in enumerate(models, 1):
+        print(f"  {i}. 🤖 {os.path.basename(model)}")
+    
+    while True:
+        try:
+            choice = int(input("\n🔢 Enter the number of the model you want to visualize: "))
+            if 1 <= choice <= len(models):
+                return models[choice - 1]
+            else:
+                print("❌ Invalid choice. Please try again.")
+        except ValueError:
+            print("❌ Please enter a valid number.")
 
 def main():
     print("\n🚀 Welcome to the Latent Space Visualizer! 👩‍💻👨‍💻\n")
@@ -96,14 +119,17 @@ def main():
     # Model parameters
     n_channels = all_data.shape[1]
     hidden_size = 64  # Should match the trained model's hidden size
+    complexity = args.complexity
 
     # Load the trained encoder
     print("🧠 Loading trained encoder...")
-    encoder = ConvLSTMEEGEncoder(n_channels=n_channels, hidden_size=hidden_size).to(device)
-    model_state_dict = torch.load('models/model.pth', map_location=device)
-    encoder_state_dict = {k.replace('encoder.', ''): v for k, v in model_state_dict.items() if 'encoder.' in k}
+    model_path = select_model()
+    encoder = ConvLSTMEEGEncoder(n_channels=n_channels, hidden_size=hidden_size, complexity=complexity).to(device)
+    model_state_dict = torch.load(model_path, map_location=device)
+    encoder_state_dict = {k.replace('encoder.', ''): v for k, v in model_state_dict['model_state_dict'].items() if 'encoder.' in k}
     encoder.load_state_dict(encoder_state_dict)
     encoder.eval()
+    print(f"✅ Loaded model: {os.path.basename(model_path)}")
 
     # Initialize a list to store latent representations
     latent_representations = []
@@ -133,7 +159,8 @@ def main():
     print("✅ UMAP embedding shape:", embedding.shape)
 
     # Save UMAP embeddings to file
-    embedding_file = f'results/umap_embeddings_n{args.n_neighbors}_d{args.min_dist}_{args.metric}.npy'
+    model_name = os.path.splitext(os.path.basename(model_path))[0]
+    embedding_file = f'results/umap_embeddings_{model_name}_n{args.n_neighbors}_d{args.min_dist}_{args.metric}.npy'
     np.save(embedding_file, embedding)
     print(f"💾 UMAP embeddings saved to '{embedding_file}'")
 
@@ -182,7 +209,7 @@ def main():
     )
 
     # Save the plot as an HTML file
-    html_file = f'results/latent_space_umap_n{args.n_neighbors}_d{args.min_dist}_{args.metric}.html'
+    html_file = f'results/latent_space_umap_{model_name}_n{args.n_neighbors}_d{args.min_dist}_{args.metric}.html'
     fig.write_html(html_file)
     print(f"💾 Interactive plot saved to '{html_file}'")
 
