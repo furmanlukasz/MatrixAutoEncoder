@@ -131,7 +131,7 @@ def main():
     print("🔄 Generating angular matrices...")
     angular_matrices, total_duration = generate_angular_matrices(raw, model, args.window, args.step, device)
     
-    output_file = f'angular_matrix_movie_{group}_{subject_path.name}.mp4'
+    output_file = f'results/angular_matrix_movie_{group}_{subject_path.name}.mp4'
     print(f"🎬 Creating movie: {output_file}")
     create_movie(angular_matrices, output_file, len(angular_matrices)/total_duration, args.dilation, total_duration)
     
