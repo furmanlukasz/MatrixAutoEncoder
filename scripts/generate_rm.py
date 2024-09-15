@@ -97,7 +97,7 @@ def main():
             batch = batch.to(device)
             mask = mask.to(device)
             # Forward pass through the model
-            reconstructed, recurrence_matrix = model(batch, epsilon)
+            reconstructed, recurrence_matrix = model(batch)
             # Move recurrence_matrix to CPU and convert to numpy
             recurrence_matrix = recurrence_matrix.cpu().numpy()
             # Append to list

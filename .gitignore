@@ -27,3 +27,4 @@ wandb
 *.DS_Store
 *.env
 *.mp4
+*.cpython-310.pyc
