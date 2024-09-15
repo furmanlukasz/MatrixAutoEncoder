@@ -38,8 +38,11 @@ class EEGDataset(Dataset):
 
     def __getitem__(self, idx):
         x = self.data[idx]
+        # scale the phase data from [-π, π] to [-1, 1]
+        x = x / np.pi  # Normalizing phase to [-1, 1]
         mask = self.masks[idx]
         return x, mask
+
 
 # Model classes
 class ConvLSTMEEGEncoder(nn.Module):
@@ -58,7 +61,7 @@ class ConvLSTMEEGEncoder(nn.Module):
             self.relu2 = nn.ReLU()
             self.lstm1 = nn.LSTM(input_size=128, hidden_size=hidden_size, batch_first=True)
             self.lstm2 = nn.LSTM(input_size=hidden_size, hidden_size=hidden_size, batch_first=True)
-        else:  # complexity == 2
+        elif complexity == 2:
             self.conv1 = nn.Conv1d(n_channels, 64, kernel_size=3, stride=1, padding=1)
             self.relu1 = nn.ReLU()
             self.conv2 = nn.Conv1d(64, 128, kernel_size=3, stride=1, padding=1)
@@ -66,6 +69,18 @@ class ConvLSTMEEGEncoder(nn.Module):
             self.conv3 = nn.Conv1d(128, 256, kernel_size=3, stride=1, padding=1)
             self.relu3 = nn.ReLU()
             self.lstm1 = nn.LSTM(input_size=256, hidden_size=hidden_size, batch_first=True)
+            self.lstm2 = nn.LSTM(input_size=hidden_size, hidden_size=hidden_size, batch_first=True)
+            self.fc = nn.Linear(hidden_size, hidden_size)
+        elif complexity == 3:
+            self.conv1 = nn.Conv1d(n_channels, 64, kernel_size=3, stride=1, padding=1)
+            self.relu1 = nn.ReLU()
+            self.conv2 = nn.Conv1d(64, 128, kernel_size=3, stride=1, padding=1)
+            self.relu2 = nn.ReLU()
+            self.conv3 = nn.Conv1d(128, 256, kernel_size=3, stride=1, padding=1)
+            self.relu3 = nn.ReLU()
+            self.conv4 = nn.Conv1d(256, 512, kernel_size=3, stride=1, padding=1)
+            self.relu4 = nn.ReLU()
+            self.lstm1 = nn.LSTM(input_size=512, hidden_size=hidden_size, batch_first=True)
             self.lstm2 = nn.LSTM(input_size=hidden_size, hidden_size=hidden_size, batch_first=True)
             self.fc = nn.Linear(hidden_size, hidden_size)
 
@@ -83,13 +98,26 @@ class ConvLSTMEEGEncoder(nn.Module):
             x = x.permute(0, 2, 1)
             x, _ = self.lstm1(x)
             x, _ = self.lstm2(x)
-        else:  # complexity == 2
+        elif self.complexity == 2:
             x = self.conv1(x)
             x = self.relu1(x)
             x = self.conv2(x)
             x = self.relu2(x)
             x = self.conv3(x)
             x = self.relu3(x)
+            x = x.permute(0, 2, 1)
+            x, _ = self.lstm1(x)
+            x, _ = self.lstm2(x)
+            x = self.fc(x)
+        elif self.complexity == 3:
+            x = self.conv1(x)
+            x = self.relu1(x)
+            x = self.conv2(x)
+            x = self.relu2(x)
+            x = self.conv3(x)
+            x = self.relu3(x)
+            x = self.conv4(x)
+            x = self.relu4(x)
             x = x.permute(0, 2, 1)
             x, _ = self.lstm1(x)
             x, _ = self.lstm2(x)
@@ -110,7 +138,7 @@ class ConvLSTMEEGDecoder(nn.Module):
             self.deconv1 = nn.ConvTranspose1d(128, 64, kernel_size=3, stride=1, padding=1)
             self.relu1 = nn.ReLU()
             self.deconv2 = nn.ConvTranspose1d(64, n_channels, kernel_size=3, stride=1, padding=1)
-        else:  # complexity == 2
+        elif complexity == 2:
             self.fc = nn.Linear(hidden_size, hidden_size)
             self.lstm1 = nn.LSTM(input_size=hidden_size, hidden_size=hidden_size, batch_first=True)
             self.lstm2 = nn.LSTM(input_size=hidden_size, hidden_size=256, batch_first=True)
@@ -119,6 +147,17 @@ class ConvLSTMEEGDecoder(nn.Module):
             self.deconv2 = nn.ConvTranspose1d(128, 64, kernel_size=3, stride=1, padding=1)
             self.relu2 = nn.ReLU()
             self.deconv3 = nn.ConvTranspose1d(64, n_channels, kernel_size=3, stride=1, padding=1)
+        elif complexity == 3:
+            self.fc = nn.Linear(hidden_size, hidden_size)
+            self.lstm1 = nn.LSTM(input_size=hidden_size, hidden_size=hidden_size, batch_first=True)
+            self.lstm2 = nn.LSTM(input_size=hidden_size, hidden_size=512, batch_first=True)
+            self.deconv1 = nn.ConvTranspose1d(512, 256, kernel_size=3, stride=1, padding=1)
+            self.relu1 = nn.ReLU()
+            self.deconv2 = nn.ConvTranspose1d(256, 128, kernel_size=3, stride=1, padding=1)
+            self.relu2 = nn.ReLU()
+            self.deconv3 = nn.ConvTranspose1d(128, 64, kernel_size=3, stride=1, padding=1)
+            self.relu3 = nn.ReLU()
+            self.deconv4 = nn.ConvTranspose1d(64, n_channels, kernel_size=3, stride=1, padding=1)
         
         self.output_activation = nn.Tanh()
 
@@ -134,7 +173,7 @@ class ConvLSTMEEGDecoder(nn.Module):
             x = self.deconv1(x)
             x = self.relu1(x)
             x = self.deconv2(x)
-        else:  # complexity == 2
+        elif self.complexity == 2:
             x = self.fc(lstm_out)
             x, _ = self.lstm1(x)
             x, _ = self.lstm2(x)
@@ -144,6 +183,18 @@ class ConvLSTMEEGDecoder(nn.Module):
             x = self.deconv2(x)
             x = self.relu2(x)
             x = self.deconv3(x)
+        elif self.complexity == 3:
+            x = self.fc(lstm_out)
+            x, _ = self.lstm1(x)
+            x, _ = self.lstm2(x)
+            x = x.permute(0, 2, 1)
+            x = self.deconv1(x)
+            x = self.relu1(x)
+            x = self.deconv2(x)
+            x = self.relu2(x)
+            x = self.deconv3(x)
+            x = self.relu3(x)
+            x = self.deconv4(x)
         reconstructed = self.output_activation(x)
         return reconstructed
 

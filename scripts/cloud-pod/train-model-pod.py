@@ -1,5 +1,13 @@
 # scripts/train_model.py
 
+# Place this at the very top of your script to limit the number of threads
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import mne
 import numpy as np
 import torch
@@ -9,7 +17,6 @@ from mne.preprocessing import compute_current_source_density
 from sklearn.model_selection import train_test_split
 import torch.nn as nn
 import sys
-import os
 from tqdm import tqdm
 import wandb
 import matplotlib.pyplot as plt
@@ -17,7 +24,7 @@ import psutil
 import time
 from dotenv import load_dotenv
 from torch.cuda.amp import GradScaler, autocast
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 
 # Import utility functions
 from utils import chunk_data, extract_phase, ConvLSTMEEGAutoencoder
@@ -34,6 +41,8 @@ class EEGDataset(Dataset):
         data = np.load(self.file_paths[idx])
         if self.transform:
             data = self.transform(data)
+        # Scale the phase data from [-π, π] to [-1, 1]
+        data = data / np.pi  # Normalizing phase to [-1, 1]
         return torch.tensor(data, dtype=torch.float32)
 
 # Disable MNE info messages
@@ -47,7 +56,7 @@ def parse_args():
         'hidden_size': 64,
         'num_epochs': 6000,
         'epsilon': np.pi / 16,
-        'complexity': 0,
+        'complexity': 2,
         'checkpoint_frequency': 50,
         'filter_low': 3.0,
         'filter_high': 40.0,
@@ -76,6 +85,9 @@ def preprocess_subject(args):
     sfreq = None
     file_paths = []
     files = [f for f in subject.glob('**/*_good_*_eeg.fif') if not f.name.startswith('._')]
+    print(f"Subject '{subject.name}' has {len(files)} files.")
+    if len(files) == 0:
+        print(f"⚠️ Warning: No data files found for subject '{subject.name}'.")
     for file in files:
         try:
             raw = mne.io.read_raw_fif(file, preload=True, verbose=False)
@@ -94,27 +106,37 @@ def preprocess_subject(args):
             print(f"⚠️ Warning: Failed to process file {file}: {e}")
     return file_paths, sfreq
 
-def preprocess_and_save_data(group_folders, n_subjects_per_group, output_dir, chunk_duration=5.0, filter_low=3.0, filter_high=40.0):
+def preprocess_and_save_data(group_dirs, n_subjects_per_group, output_dir, chunk_duration=5.0, filter_low=3.0, filter_high=40.0):
     os.makedirs(output_dir, exist_ok=True)
     all_file_paths = []
     sfreq = None
 
     args_list = []
-    for group in group_folders:
-        group_name = group.name
-        subject_folders = [f for f in group.glob('*') if f.is_dir()]
+    for group_name, group_dir in group_dirs.items():
+        filt_dir = group_dir / 'FILT'
+        if not filt_dir.exists():
+            print(f"⚠️ Warning: FILT directory does not exist for group '{group_name}' at path '{filt_dir}'.")
+            continue
+        # Collect subject folders under the FILT directory
+        subject_folders = [f for f in filt_dir.glob('*') if f.is_dir()]
+        print(f"Group '{group_name}' has {len(subject_folders)} subjects.")
+        if len(subject_folders) == 0:
+            print(f"⚠️ Warning: No subject folders found in {filt_dir}.")
         subject_folders = subject_folders[:n_subjects_per_group]
         for subject in subject_folders:
             args_list.append((subject, group_name, output_dir, chunk_duration, filter_low, filter_high))
 
-    # Use all available CPU cores
-    num_processes = min(cpu_count(), len(args_list))
-    with Pool(processes=num_processes) as pool:
-        with tqdm(total=len(args_list), desc="Processing subjects") as pbar:
-            for result in pool.imap_unordered(preprocess_subject, args_list):
-                file_paths, sfreq = result
-                all_file_paths.extend(file_paths)
-                pbar.update(1)
+    total_subjects = len(args_list)
+    if total_subjects == 0:
+        print("❌ No subjects found to process. Please check your data directories and glob patterns.")
+        sys.exit(1)
+
+    print(f"Total subjects to process: {total_subjects}")
+
+    # Process subjects sequentially
+    for args in tqdm(args_list, desc="Processing subjects"):
+        file_paths, sfreq = preprocess_subject(args)
+        all_file_paths.extend(file_paths)
 
     return all_file_paths, sfreq
 
@@ -167,13 +189,13 @@ def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, c
     ax2.plot(time, reconstructed[channel].detach().cpu().numpy())
     ax2.set_title('Reconstructed Signal')
     ax2.set_xlabel('Time (s)')
-    ax2.set_ylabel('Amplitude')
+    ax2.set_ylabel('Phase (Φ)')
 
     ax3 = fig.add_subplot(gs[1, 1:])
     ax3.plot(time, original[channel].detach().cpu().numpy())
     ax3.set_title('Original Signal')
     ax3.set_xlabel('Time (s)')
-    ax3.set_ylabel('Amplitude')
+    ax3.set_ylabel('Phase (Φ)')
 
     plt.tight_layout()
     return fig
@@ -226,7 +248,7 @@ def main():
         wandb.config.update(args)
 
     # Set the paths
-    data_dir = pathlib.Path('data')
+    data_dir = pathlib.Path('/workspace/MatrixAutoEncoder/data')
     print(f"📂 Data directory: {data_dir}")
     group_dirs = {
         'AD': data_dir / 'AD',
@@ -234,7 +256,7 @@ def main():
         'MCI': data_dir / 'MCI'
     }
 
-    output_dir = 'preprocessed_data'
+    output_dir = '/workspace/MatrixAutoEncoder/preprocessed_data'
 
     # Check if preprocessed data exists
     if os.path.exists(output_dir) and len(os.listdir(output_dir)) > 0:
@@ -246,7 +268,7 @@ def main():
         # Preprocess data and get file paths
         print(f"📊 Preprocessing and saving data... - setting fmin: {args['filter_low']} - fmax: {args['filter_high']}")
         file_paths, sfreq = preprocess_and_save_data(
-            group_folders=[group_dirs['AD'], group_dirs['HID'], group_dirs['MCI']],
+            group_dirs=group_dirs,
             n_subjects_per_group=args['n_subjects_per_group'],
             output_dir=output_dir,
             chunk_duration=args['chunk_duration'],
@@ -280,8 +302,7 @@ def main():
     print_memory_usage()
 
     # Device configuration
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"🖥️ Using device: {device}")
 
     # Model parameters
@@ -302,7 +323,7 @@ def main():
     print(f"🧮 Use threshold: {model.use_threshold}")
 
     # Check for existing model and ask user for fine-tuning
-    model_path = 'models/model.pth'
+    model_path = '/workspace/MatrixAutoEncoder/models/model.pth'
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     model, is_fine_tuning = load_or_initialize_model(model, model_path)
 

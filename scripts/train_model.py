@@ -28,7 +28,7 @@ mne.set_log_level('ERROR')
 
 def parse_args():
     args = {
-        'n_subjects_per_group': 10,
+        'n_subjects_per_group': 2,
         'batch_size': 64,
         'chunk_duration': 5.0,
         'hidden_size': 64,
@@ -131,17 +131,17 @@ def plot_sample_and_reconstruction(original, reconstructed, recurrence_matrix, c
 
     # Plot reconstructed sample
     ax2 = fig.add_subplot(gs[0, 1:])  # Span two columns
-    ax2.plot(time, reconstructed[channel].detach().cpu().numpy())
+    ax2.plot(time, reconstructed[channel].detach().cpu().numpy() * np.pi)
     ax2.set_title('Reconstructed Signal')
     ax2.set_xlabel('Time (s)')
-    ax2.set_ylabel('Amplitude')
+    ax2.set_ylabel('Phase (Φ)')
 
     # Plot original sample
     ax3 = fig.add_subplot(gs[1, 1:])  # Span two columns
-    ax3.plot(time, original[channel].detach().cpu().numpy())
+    ax3.plot(time, original[channel].detach().cpu().numpy() * np.pi)
     ax3.set_title('Original Signal')
     ax3.set_xlabel('Time (s)')
-    ax3.set_ylabel('Amplitude')
+    ax3.set_ylabel('Phase (Φ)')
 
     plt.tight_layout()
     return fig

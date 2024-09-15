@@ -2,7 +2,7 @@ PROJECT_DIR := /Users/luki/Documents/GitHub/MatrixAutoEncoder
 PYTHON_ENV := /Volumes/Transcend/DataAnalysis-MCI-AD-HC/venv/bin/python
 
 train_model:
-	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/train_model.py
+	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/train_model.py 
 
 train_model_pod:
 	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/cloud-pod/train-model-pod.py

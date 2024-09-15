@@ -1,25 +1,30 @@
 # scripts/visualize_latent_space.py
-# TODO: REview and clean up some of the code from distrubted training not working
+
+# Place this at the very top of your script to limit the number of threads
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import mne
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pathlib
-from mne.preprocessing import compute_current_source_density
+from sklearn.model_selection import train_test_split
 import torch.nn as nn
 import umap
 import plotly.graph_objects as go
 import sys
-import os
 from tqdm import tqdm
 import argparse
-import glob
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 from torch.cuda.amp import autocast, GradScaler
 
 # Import utility functions
-from utils import chunk_data, extract_phase, ConvLSTMEEGEncoder
+from utils import ConvLSTMEEGEncoder
 
 # Disable MNE info messages
 mne.set_log_level('ERROR')
@@ -58,81 +63,15 @@ def parse_args():
                         help='Batch size for DataLoader')
     return parser.parse_args()
 
-def preprocess_subject(args):
-    subject, group_name, output_dir, chunk_duration = args
-    sfreq = None
-    file_paths = []
-    labels = []
-    label_mapping = {'AD': 0, 'HID': 1, 'MCI': 2}
-    # Adjusted glob pattern to find data files within the subject folder
-    files = [f for f in subject.glob('**/*_good_*_eeg.fif') if not f.name.startswith('._')]
-    print(f"Subject '{subject.name}' has {len(files)} files.")
-    if len(files) == 0:
-        print(f"⚠️ Warning: No data files found for subject '{subject.name}'.")
-    for file in files:
-        try:
-            raw = mne.io.read_raw_fif(file, preload=True, verbose=False)
-            raw = compute_current_source_density(raw)
-            data = raw.get_data()
-            sfreq = raw.info['sfreq']
-            chunks = chunk_data(data, sfreq, chunk_duration=chunk_duration)
-            for i, chunk in enumerate(chunks):
-                phase_chunk = extract_phase(chunk)
-                file_name = f"{group_name}_{subject.name}_{file.stem}_{i}.npy"
-                file_path = os.path.join(output_dir, file_name)
-                np.save(file_path, phase_chunk)
-                file_paths.append(file_path)
-                labels.append(label_mapping[group_name])
-        except Exception as e:
-            print(f"⚠️ Warning: Failed to process file {file}: {e}")
-    return file_paths, labels
-
-def preprocess_and_save_data(group_dirs, n_subjects_per_group, output_dir, chunk_duration=5.0):
-    os.makedirs(output_dir, exist_ok=True)
-    all_file_paths = []
-    all_labels = []
-
-    args_list = []
-    for group_name, group_dir in group_dirs.items():
-        filt_dir = group_dir / 'FILT'
-        if not filt_dir.exists():
-            print(f"⚠️ Warning: FILT directory does not exist for group '{group_name}' at path '{filt_dir}'.")
-            continue
-        # Collect subject folders under the FILT directory
-        subject_folders = [f for f in filt_dir.glob('*') if f.is_dir()]
-        print(f"Group '{group_name}' has {len(subject_folders)} subjects.")
-        if len(subject_folders) == 0:
-            print(f"⚠️ Warning: No subject folders found in {filt_dir}.")
-        subject_folders = subject_folders[:n_subjects_per_group]
-        for subject in subject_folders:
-            args_list.append((subject, group_name, output_dir, chunk_duration))
-
-    total_subjects = len(args_list)
-    if total_subjects == 0:
-        print("❌ No subjects found to process. Please check your data directories and glob patterns.")
-        sys.exit(1)
-
-    print(f"Total subjects to process: {total_subjects}")
-    num_processes = min(cpu_count(), total_subjects)
-    with Pool(processes=num_processes) as pool:
-        with tqdm(total=total_subjects, desc="Processing subjects") as pbar:
-            for result in pool.imap_unordered(preprocess_subject, args_list):
-                file_paths, labels = result
-                all_file_paths.extend(file_paths)
-                all_labels.extend(labels)
-                pbar.update(1)
-
-    return all_file_paths, all_labels
-
 def select_model():
-    models = glob.glob('/workspace/MatrixAutoEncoder/models/*.pth')
+    models = list(pathlib.Path('/workspace/MatrixAutoEncoder/models').glob('*.pth'))
     if not models:
         print("❌ No models found in the '/workspace/MatrixAutoEncoder/models' directory.")
         sys.exit(1)
 
     print("📚 Available models:")
     for i, model in enumerate(models, 1):
-        print(f"  {i}. 🤖 {os.path.basename(model)}")
+        print(f"  {i}. 🤖 {model.name}")
 
     while True:
         try:
@@ -159,11 +98,15 @@ def main():
         'MCI': data_dir / 'MCI'
     }
 
-    output_dir = '/workspace/MatrixAutoEncoder/preprocessed_data_visualization'
+    # Use the same preprocessed data directory as in train_model.py
+    output_dir = '/workspace/MatrixAutoEncoder/preprocessed_data'
 
     # Check if preprocessed data exists
-    if os.path.exists(output_dir) and len(os.listdir(output_dir)) > 0:
-        print("🗂️ Preprocessed data already exists. Skipping preprocessing.")
+    if not os.path.exists(output_dir) or len(os.listdir(output_dir)) == 0:
+        print("❌ Preprocessed data not found. Please run 'train_model.py' first to generate preprocessed data.")
+        sys.exit(1)
+    else:
+        print("🗂️ Using preprocessed data from 'train_model.py'.")
         # Collect all file paths and labels
         file_paths = []
         labels = []
@@ -172,16 +115,12 @@ def main():
             if file_name.endswith('.npy'):
                 file_paths.append(os.path.join(output_dir, file_name))
                 group_name = file_name.split('_')[0]
-                labels.append(label_mapping[group_name])
-    else:
-        # Preprocess data and get file paths and labels
-        print(f"📊 Preprocessing and saving data... - chunk_duration: {args.chunk_duration}")
-        file_paths, labels = preprocess_and_save_data(
-            group_dirs=group_dirs,
-            n_subjects_per_group=args.n_subjects_per_group,
-            output_dir=output_dir,
-            chunk_duration=args.chunk_duration
-        )
+                labels.append(label_mapping.get(group_name, -1))  # Default to -1 if group not recognized
+
+        # Filter out any files with unrecognized group names
+        valid_indices = [i for i, label in enumerate(labels) if label != -1]
+        file_paths = [file_paths[i] for i in valid_indices]
+        labels = [labels[i] for i in valid_indices]
 
     # Create Dataset and DataLoader
     batch_size = args.batch_size
@@ -270,7 +209,7 @@ def main():
 
     # Create label names
     label_names = {0: 'AD', 1: 'HID', 2: 'MCI'}
-    label_texts = [label_names[label] for label in labels]
+    label_texts = [label_names.get(label, 'Unknown') for label in labels]
 
     print("🎨 Creating interactive 3D scatter plot...")
     # Create an interactive 3D scatter plot

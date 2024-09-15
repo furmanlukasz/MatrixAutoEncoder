@@ -1,0 +1,31 @@
+{
+    "model_config": {
+        "encoder": {
+            "conv_layers": [
+                {"in_channels": 256, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1, "activation": "ReLU"},
+                {"in_channels": 64, "out_channels": 128, "kernel_size": 3, "stride": 1, "padding": 1, "activation": "ReLU"},
+                {"in_channels": 128, "out_channels": 256, "kernel_size": 3, "stride": 1, "padding": 1, "activation": "ReLU"}
+            ],
+            "lstm_layers": [
+                {"input_size": 256, "hidden_size": 128, "num_layers": 1, "batch_first": true},
+                {"input_size": 128, "hidden_size": 128, "num_layers": 1, "batch_first": true}
+            ],
+            "fc_layers": [
+                {"in_features": 128, "out_features": 128, "activation": "ReLU"}
+            ]
+        },
+        "decoder": {
+            "fc_layers": [
+                {"in_features": 128, "out_features": 128, "activation": "ReLU"}
+            ],
+            "lstm_layers": [
+                {"input_size": 128, "hidden_size": 128, "num_layers": 2, "batch_first": true}
+            ],
+            "deconv_layers": [
+                {"in_channels": 128, "out_channels": 128, "kernel_size": 3, "stride": 1, "padding": 1, "activation": "ReLU"},
+                {"in_channels": 128, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1, "activation": "ReLU"},
+                {"in_channels": 64, "out_channels": 256, "kernel_size": 3, "stride": 1, "padding": 1, "activation": "Tanh"}
+            ]
+        }
+    }
+}
