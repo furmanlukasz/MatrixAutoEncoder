@@ -138,7 +138,7 @@ def create_and_save_plot(df, color_by, args, model_name, results_dir):
         y='UMAP2',
         z='UMAP3',
         color=color_by,
-        hover_data=['Condition', 'BaseSubject', 'Subject', 'Index', 'Label'],
+        hover_data=['Condition', 'BaseSubject', 'Subject', 'Index', 'Label', 'original_fif_file'],
         labels={'color': color_by},
     )
 
@@ -207,6 +207,15 @@ def main():
         file_paths = [file_paths[i] for i in valid_indices]
         condition_labels = [condition_labels[i] for i in valid_indices]
         subject_infos = [subject_infos[i] for i in valid_indices]
+
+    # Load metadata CSV
+    metadata_csv_path = os.path.join(output_dir, 'chunk_metadata.csv')
+    if os.path.exists(metadata_csv_path):
+        metadata_df = pd.read_csv(metadata_csv_path)
+        print(f"✅ Loaded metadata CSV from '{metadata_csv_path}'")
+    else:
+        print(f"❌ Metadata CSV not found at '{metadata_csv_path}'. Please ensure it was generated during preprocessing.")
+        sys.exit(1)
 
     # Create Dataset and DataLoader
     batch_size = args.batch_size
@@ -289,6 +298,18 @@ def main():
         'Label': [f"Condition: {condition_names[label]}, Subject: {extract_base_subject_id(info[0])}, Full ID: {info[0]}, Index: {info[1]}" 
                   for label, info in zip(condition_labels, subject_infos)]
     })
+
+    # After creating the main DataFrame 'df', merge it with 'metadata_df' on 'chunk_file'
+    df_metadata = pd.DataFrame({
+        'chunk_file': file_paths
+    })
+    
+    # Merge the embedding DataFrame with metadata
+    df_combined = pd.concat([df_metadata.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
+    df_combined = df_combined.merge(metadata_df, on='chunk_file', how='left')
+    
+    # Use 'df_combined' for your further analysis and visualization
+    df = df_combined  # Replace 'df' with the combined DataFrame
 
     # Save the DataFrame
     model_name = os.path.splitext(os.path.basename(model_path))[0]

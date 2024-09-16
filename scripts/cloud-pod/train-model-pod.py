@@ -80,7 +80,7 @@ def print_memory_usage():
     print(f"GPU Memory Usage: {gpu_memory:.2f} MB")
     print(f"RAM Usage: {ram_memory:.2f} MB")
 
-def preprocess_subject(args):
+def preprocess_subject(args, metadata_list):
     subject, group_name, output_dir, chunk_duration, filter_low, filter_high = args
     sfreq = None
     file_paths = []
@@ -102,22 +102,34 @@ def preprocess_subject(args):
                 file_path = os.path.join(output_dir, file_name)
                 np.save(file_path, phase_chunk)
                 file_paths.append(file_path)
+                
+                # Collect metadata
+                metadata_list.append({
+                    'chunk_file': file_path,
+                    'original_fif_file': str(file),
+                    'group': group_name,
+                    'subject': subject.name,
+                    'file_stem': file.stem,
+                    'chunk_index': i
+                })
         except Exception as e:
             print(f"⚠️ Warning: Failed to process file {file}: {e}")
     return file_paths, sfreq
 
-def preprocess_and_save_data(group_dirs, n_subjects_per_group, output_dir, chunk_duration=5.0, filter_low=3.0, filter_high=40.0):
+def preprocess_and_save_data(group_dirs, n_subjects_per_group, output_dir, chunk_duration=5.0, filter_low=3.0, filter_high=40.0, metadata_list=None):
     os.makedirs(output_dir, exist_ok=True)
     all_file_paths = []
     sfreq = None
 
+    if metadata_list is None:
+        metadata_list = []
+    
     args_list = []
     for group_name, group_dir in group_dirs.items():
         filt_dir = group_dir / 'FILT'
         if not filt_dir.exists():
             print(f"⚠️ Warning: FILT directory does not exist for group '{group_name}' at path '{filt_dir}'.")
             continue
-        # Collect subject folders under the FILT directory
         subject_folders = [f for f in filt_dir.glob('*') if f.is_dir()]
         print(f"Group '{group_name}' has {len(subject_folders)} subjects.")
         if len(subject_folders) == 0:
@@ -125,19 +137,19 @@ def preprocess_and_save_data(group_dirs, n_subjects_per_group, output_dir, chunk
         subject_folders = subject_folders[:n_subjects_per_group]
         for subject in subject_folders:
             args_list.append((subject, group_name, output_dir, chunk_duration, filter_low, filter_high))
-
+    
     total_subjects = len(args_list)
     if total_subjects == 0:
         print("❌ No subjects found to process. Please check your data directories and glob patterns.")
         sys.exit(1)
-
+    
     print(f"Total subjects to process: {total_subjects}")
-
+    
     # Process subjects sequentially
     for args in tqdm(args_list, desc="Processing subjects"):
-        file_paths, sfreq = preprocess_subject(args)
+        file_paths, sfreq = preprocess_subject(args, metadata_list)
         all_file_paths.extend(file_paths)
-
+    
     return all_file_paths, sfreq
 
 def load_or_initialize_model(model, model_path):
@@ -301,6 +313,10 @@ def main():
         sfreq = 250  # Set your sampling frequency accordingly
     else:
         # Preprocess data and get file paths
+        import pandas as pd
+
+        metadata_list = []
+        
         print(f"📊 Preprocessing and saving data... - setting fmin: {args['filter_low']} - fmax: {args['filter_high']}")
         file_paths, sfreq = preprocess_and_save_data(
             group_dirs=group_dirs,
@@ -308,8 +324,15 @@ def main():
             output_dir=output_dir,
             chunk_duration=args['chunk_duration'],
             filter_low=args['filter_low'],
-            filter_high=args['filter_high']
+            filter_high=args['filter_high'],
+            metadata_list=metadata_list  # Pass the metadata list to the function
         )
+        
+        # After preprocessing, create a DataFrame from metadata_list and save it
+        metadata_df = pd.DataFrame(metadata_list)
+        metadata_csv_path = os.path.join(output_dir, 'chunk_metadata.csv')
+        metadata_df.to_csv(metadata_csv_path, index=False)
+        print(f"💾 Metadata CSV saved to '{metadata_csv_path}'")
 
     # Split file paths into training and testing
     train_files, test_files = train_test_split(file_paths, test_size=0.2, random_state=42)
