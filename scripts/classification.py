@@ -4,7 +4,7 @@ import os
 import argparse
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score, f1_score, classification_report
 from sklearn.ensemble import RandomForestClassifier
@@ -27,15 +27,19 @@ def load_data(input_csv):
         if feature not in df.columns:
             print(f"❌ Missing RQA feature '{feature}' in the input CSV.")
             exit(1)
-    return df
-
-def prepare_data(df):
-    # Assuming 'label' column contains the target variable
+    # Ensure 'Condition' and 'Subject' columns exist
     if 'Condition' not in df.columns:
         print("❌ 'Condition' column not found in the input CSV.")
         exit(1)
+    if 'Subject' not in df.columns:
+        print("❌ 'Subject' column not found in the input CSV.")
+        exit(1)
+    return df
+
+def prepare_data(df):
     X = df[['RR', 'DET', 'L', 'Lmax', 'ENTR', 'LAM', 'TT', 'Vmax']]
     y = df['Condition']
+    groups = df['Subject']
     # Encode labels if they are categorical
     if y.dtype == object:
         le = LabelEncoder()
@@ -45,11 +49,26 @@ def prepare_data(df):
     # Scale features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    return X_scaled, y
+    return X_scaled, y, groups
 
-def train_and_evaluate(X, y):
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+def train_and_evaluate(X, y, groups):
+    # Initialize GroupShuffleSplit
+    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+    train_idx, test_idx = next(gss.split(X, y, groups))
+    
+    X_train, X_test = X[train_idx], X[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
+    
+    # Optional: Verify that no groups overlap
+    train_groups = groups.iloc[train_idx].unique()
+    test_groups = groups.iloc[test_idx].unique()
+    overlap = set(train_groups).intersection(set(test_groups))
+    if overlap:
+        print(f"❌ Overlapping subjects found in train and test sets: {overlap}")
+        exit(1)
+    else:
+        print("✅ No overlapping subjects between training and test sets.")
+    
     # Initialize classifiers
     classifiers = {
         'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
@@ -75,8 +94,8 @@ def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
     df = load_data(args.input_csv)
-    X, y = prepare_data(df)
-    results = train_and_evaluate(X, y)
+    X, y, groups = prepare_data(df)
+    results = train_and_evaluate(X, y, groups)
     # Save results
     results_df = pd.DataFrame(results).T
     results_df.to_csv(os.path.join(args.output_dir, 'classification_results.csv'))
