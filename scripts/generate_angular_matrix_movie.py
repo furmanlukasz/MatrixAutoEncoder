@@ -107,6 +107,7 @@ def main():
     parser.add_argument("--window", type=float, default=1.0, help="Window duration in seconds")
     parser.add_argument("--step", type=float, default=0.1, help="Step size in seconds")
     parser.add_argument("--dilation", type=float, default=1.0, help="Time dilation factor")
+    parser.add_argument("--model_path", type=str, default='models/model.pth', help="Path to the trained model")
     args = parser.parse_args()
 
     group = select_group()
@@ -123,7 +124,7 @@ def main():
     
     print("🧠 Loading trained model...")
     model = ConvLSTMEEGAutoencoder(n_channels=n_channels, hidden_size=hidden_size).to(device)
-    model.load_state_dict(torch.load('models/model.pth', map_location=device))
+    model.load_state_dict(torch.load(args.model_path, map_location=device))
     model.use_threshold = False
     model.eval()
     

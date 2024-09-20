@@ -24,9 +24,10 @@ def parse_args():
                         help='Path to save the output CSV file with RQA features')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for DataLoader')
-    # Add argument for threshold percentile
     parser.add_argument('--threshold_percentile', type=float, default=85.0,
                         help='Percentile for thresholding the recurrence matrix (default: 85.0)')
+    parser.add_argument('--compute_all', action='store_true',
+                        help='Compute RQA features for all chunks, ignoring ForFurtherAnalysis flag')
     return parser.parse_args()
 
 def select_model():
@@ -130,12 +131,16 @@ def main():
             print(f"❌ Required column '{col}' not found in the input CSV.")
             sys.exit(1)
 
-    # Filter DataFrame for 'ForFurtherAnalysis' == True
-    df_filtered = df[df['ForFurtherAnalysis'] == True].reset_index(drop=True)
-    print(f"✅ {len(df_filtered)} samples marked for further analysis.")
+    # Filter DataFrame based on compute_all flag
+    if args.compute_all:
+        df_filtered = df.reset_index(drop=True)
+        print(f"✅ Computing RQA features for all {len(df_filtered)} samples.")
+    else:
+        df_filtered = df[df['ForFurtherAnalysis'] == True].reset_index(drop=True)
+        print(f"✅ {len(df_filtered)} samples marked for further analysis.")
 
     if len(df_filtered) == 0:
-        print("❌ No samples marked for further analysis. Exiting.")
+        print("❌ No samples to process. Exiting.")
         sys.exit(1)
 
     # Load the model
