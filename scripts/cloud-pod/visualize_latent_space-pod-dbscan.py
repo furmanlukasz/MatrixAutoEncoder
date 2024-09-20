@@ -21,14 +21,11 @@ import sys
 from tqdm import tqdm
 import argparse
 from multiprocessing import cpu_count
-from torch.cuda.amp import autocast, GradScaler # type: ignore
-import re
-from sklearn.preprocessing import LabelEncoder # type: ignore
+from torch.cuda.amp import autocast, GradScaler
+from sklearn.preprocessing import LabelEncoder
 import plotly.express as px
 import pandas as pd
-from itertools import cycle
-import colorsys
-import random
+from sklearn.cluster import DBSCAN
 
 # Import utility functions
 from utils import ConvLSTMEEGEncoder
@@ -36,52 +33,8 @@ from utils import ConvLSTMEEGEncoder
 # Disable MNE info messages
 mne.set_log_level('ERROR')
 
-# Add this flag at the beginning of the script
-COLOR_BY_SUBJECT = True  # Set to True to color by subject, False to color by condition
-
-def generate_distinct_colors(n):
-    hue_partition = 1.0 / (n + 1)
-    colors = []
-    for i in range(n):
-        hue = i * hue_partition
-        saturation = random.uniform(0.7, 1.0)
-        lightness = random.uniform(0.4, 0.6)
-        r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
-        colors.append(f'#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}')
-    
-    # Shuffle the colors to avoid local similarities
-    random.shuffle(colors)
-    return colors
-
-# Generate 300 distinct colors
-distinct_colors = generate_distinct_colors(300)
-
-def get_distinct_colors(n):
-    return distinct_colors[:n]
-
-def extract_base_subject_id(subject_id):
-    """Extract the base subject ID, everything before '_good_'"""
-    parts = subject_id.split('_good_')
-    return parts[0] if len(parts) > 1 else subject_id
-
-class EEGDataset(Dataset):
-    def __init__(self, file_paths, labels, transform=None):
-        self.file_paths = file_paths
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.file_paths)
-
-    def __getitem__(self, idx):
-        data = np.load(self.file_paths[idx])
-        label = self.labels[idx]
-        if self.transform:
-            data = self.transform(data)
-        return torch.tensor(data, dtype=torch.float32), label
-
 def parse_args():
-    parser = argparse.ArgumentParser(description="Visualize latent space with customizable UMAP parameters")
+    parser = argparse.ArgumentParser(description="Visualize latent space with cluster analysis")
     parser.add_argument('--n_neighbors', type=int, choices=[5, 10, 15], default=10,
                         help='Number of neighbors for UMAP (5, 10, or 15)')
     parser.add_argument('--min_dist', type=float, choices=[0.05, 0.25, 0.5], default=0.25,
@@ -96,6 +49,10 @@ def parse_args():
                         help='Duration of each data chunk in seconds')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for DataLoader')
+    parser.add_argument('--dbscan_eps', type=float, default=0.1,
+                        help='The maximum distance between two samples for DBSCAN to consider them as in the same neighborhood')
+    parser.add_argument('--dbscan_min_samples', type=int, default=3,
+                        help='The number of samples (or total weight) in a neighborhood for a point to be considered as a core point in DBSCAN')
     return parser.parse_args()
 
 def select_model():
@@ -118,54 +75,24 @@ def select_model():
         except ValueError:
             print("❌ Please enter a valid number.")
 
-def extract_subject_info(file_path):
-    file_name = os.path.basename(file_path)
-    # Try to extract subject ID and index
-    match = re.search(r'(\w+)_(\d+)', file_name)
-    if match:
-        subject_id = match.group(1)
-        subject_index = match.group(2)
-    else:
-        # If the pattern doesn't match, use the whole filename as subject_id
-        subject_id = os.path.splitext(file_name)[0]
-        subject_index = "N/A"
-    return subject_id, subject_index
+class EEGDataset(Dataset):
+    def __init__(self, file_paths, labels, transform=None):
+        self.file_paths = file_paths
+        self.labels = labels
+        self.transform = transform
 
-def create_and_save_plot(df, color_by, args, model_name, results_dir):
-    fig = px.scatter_3d(
-        df,
-        x='UMAP1',
-        y='UMAP2',
-        z='UMAP3',
-        color=color_by,
-        hover_data=['Condition', 'BaseSubject', 'Subject', 'Index', 'Label', 'original_fif_file'],
-        labels={'color': color_by},
-    )
+    def __len__(self):
+        return len(self.file_paths)
 
-    fig.update_traces(marker=dict(size=3))
-
-    fig.update_layout(
-        title=f'3D UMAP Projection of Latent Space (Colored by {color_by}, n_neighbors={args.n_neighbors}, min_dist={args.min_dist}, metric={args.metric})',
-        scene=dict(
-            xaxis_title='UMAP1',
-            yaxis_title='UMAP2',
-            zaxis_title='UMAP3',
-            xaxis=dict(showgrid=False, zeroline=False, showline=False, showticklabels=False, title=''),
-            yaxis=dict(showgrid=False, zeroline=False, showline=False, showticklabels=False, title=''),
-            zaxis=dict(showgrid=False, zeroline=False, showline=False, showticklabels=False, title=''),
-        ),
-        width=1024,
-        height=1024,
-        margin=dict(r=0, b=0, l=0, t=50),
-        template="plotly_white"
-    )
-
-    html_file = f'{results_dir}/latent_space_umap_{model_name}_n{args.n_neighbors}_d{args.min_dist}_{args.metric}_{color_by}.html'
-    fig.write_html(html_file)
-    print(f"💾 Interactive plot (colored by {color_by}) saved to '{html_file}'")
+    def __getitem__(self, idx):
+        data = np.load(self.file_paths[idx])
+        label = self.labels[idx]
+        if self.transform:
+            data = self.transform(data)
+        return torch.tensor(data, dtype=torch.float32), label
 
 def main():
-    print("\n🚀 Welcome to the Latent Space Visualizer! 👩‍💻👨‍💻\n")
+    print("\n🚀 Welcome to the Latent Space Visualizer with Clustering! 👩‍💻👨‍💻\n")
 
     # Parse command-line arguments
     args = parse_args()
@@ -188,10 +115,9 @@ def main():
         sys.exit(1)
     else:
         print("🗂️ Using preprocessed data from 'train_model.py'.")
-        # Collect all file paths, labels, and subject info
+        # Collect all file paths and labels
         file_paths = []
         condition_labels = []
-        subject_infos = []
         label_mapping = {'AD': 0, 'HID': 1, 'MCI': 2}
         for file_name in os.listdir(output_dir):
             if file_name.endswith('.npy'):
@@ -199,14 +125,11 @@ def main():
                 file_paths.append(file_path)
                 group_name = file_name.split('_')[0]
                 condition_labels.append(label_mapping.get(group_name, -1))
-                subject_id, subject_index = extract_subject_info(file_path)
-                subject_infos.append((subject_id, subject_index))
 
         # Filter out any files with unrecognized group names
         valid_indices = [i for i, label in enumerate(condition_labels) if label != -1]
         file_paths = [file_paths[i] for i in valid_indices]
         condition_labels = [condition_labels[i] for i in valid_indices]
-        subject_infos = [subject_infos[i] for i in valid_indices]
 
     # Load metadata CSV
     metadata_csv_path = os.path.join(output_dir, 'chunk_metadata.csv')
@@ -216,6 +139,9 @@ def main():
     else:
         print(f"❌ Metadata CSV not found at '{metadata_csv_path}'. Please ensure it was generated during preprocessing.")
         sys.exit(1)
+
+    # Make sure the metadata corresponds to the file paths
+    metadata_df = metadata_df[metadata_df['chunk_file'].isin(file_paths)]
 
     # Create Dataset and DataLoader
     batch_size = args.batch_size
@@ -283,33 +209,23 @@ def main():
     embedding = reducer.fit_transform(latent_representations)
     print("✅ UMAP embedding shape:", embedding.shape)
 
-    # Define condition_names here
+    # Define condition names
     condition_names = {0: 'AD', 1: 'HID', 2: 'MCI'}
 
     # Create a DataFrame with all metadata
     df = pd.DataFrame({
+        'chunk_file': file_paths,
         'UMAP1': embedding[:, 0],
         'UMAP2': embedding[:, 1],
         'UMAP3': embedding[:, 2],
         'Condition': [condition_names[label] for label in condition_labels],
-        'Subject': [info[0] for info in subject_infos],
-        'Index': [info[1] for info in subject_infos],
-        'BaseSubject': [extract_base_subject_id(info[0]) for info in subject_infos],
-        'Label': [f"Condition: {condition_names[label]}, Subject: {extract_base_subject_id(info[0])}, Full ID: {info[0]}, Index: {info[1]}" 
-                  for label, info in zip(condition_labels, subject_infos)]
     })
 
-    # After creating the main DataFrame 'df', merge it with 'metadata_df' on 'chunk_file'
-    df_metadata = pd.DataFrame({
-        'chunk_file': file_paths
-    })
-    
-    # Merge the embedding DataFrame with metadata
-    df_combined = pd.concat([df_metadata.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
-    df_combined = df_combined.merge(metadata_df, on='chunk_file', how='left')
-    
-    # Use 'df_combined' for your further analysis and visualization
-    df = df_combined  # Replace 'df' with the combined DataFrame
+    # Merge with metadata_df
+    df = df.merge(metadata_df, on='chunk_file', how='left')
+
+    # Add labels for plotting
+    df['Label'] = df.apply(lambda row: f"Condition: {row['Condition']}, Subject: {row['subject']}, File: {os.path.basename(row['original_fif_file'])}, Chunk Index: {row['chunk_index']}", axis=1)
 
     # Save the DataFrame
     model_name = os.path.splitext(os.path.basename(model_path))[0]
@@ -319,11 +235,68 @@ def main():
     df.to_csv(df_file, index=False)
     print(f"💾 DataFrame with all metadata and embeddings saved to '{df_file}'")
 
-    # Create and save plots for both color schemes
-    create_and_save_plot(df, 'Condition', args, model_name, results_dir)
-    create_and_save_plot(df, 'BaseSubject', args, model_name, results_dir)
+    # Perform clustering using DBSCAN
+    print("\n🔍 Performing cluster analysis using DBSCAN...")
+    dbscan = DBSCAN(eps=args.dbscan_eps, min_samples=args.dbscan_min_samples)
+    df['Cluster'] = dbscan.fit_predict(df[['UMAP1', 'UMAP2', 'UMAP3']])
+    print(f"✅ Cluster analysis complete!")
 
-    print("\n🎉 Latent space visualization complete! 🎉")
+    # Identify clusters with mixed conditions
+    print("📝 Identifying clusters with mixed conditions...")
+    cluster_condition_counts = df.groupby('Cluster')['Condition'].nunique()
+    mixed_clusters = cluster_condition_counts[cluster_condition_counts > 1].index.tolist()
+    print(f"Clusters with mixed conditions: {mixed_clusters}")
+
+    # Mark clusters for exclusion
+    df['ForFurtherAnalysis'] = ~df['Cluster'].isin(mixed_clusters)
+
+    # Save the updated DataFrame
+    df_file_updated = f'{results_dir}/latent_space_data_{model_name}_n{args.n_neighbors}_d{args.min_dist}_{args.metric}_clusters.csv'
+    df.to_csv(df_file_updated, index=False)
+    print(f"💾 Updated DataFrame with clustering information saved to '{df_file_updated}'")
+
+    # Plotting
+    print("\n📊 Creating plots...")
+
+    # Plot with all data points
+    fig_all = px.scatter_3d(
+        df,
+        x='UMAP1',
+        y='UMAP2',
+        z='UMAP3',
+        color='Condition',
+        hover_data=['Label'],
+        labels={'color': 'Condition'},
+        title=f'3D UMAP Projection - All Data (n_neighbors={args.n_neighbors}, min_dist={args.min_dist}, metric={args.metric})'
+    )
+    fig_all.update_traces(marker=dict(size=3))
+    fig_all.update_layout(width=1000, height=800)
+    html_file_all = f'{results_dir}/latent_space_umap_{model_name}_all_data.html'
+    fig_all.write_html(html_file_all)
+    print(f"💾 Plot with all data saved to '{html_file_all}'")
+
+    # Filter data for further analysis
+    filtered_df = df[df['ForFurtherAnalysis']]
+    print(f"✅ Filtered data contains {len(filtered_df)} samples.")
+
+    # Plot with filtered data
+    fig_filtered = px.scatter_3d(
+        filtered_df,
+        x='UMAP1',
+        y='UMAP2',
+        z='UMAP3',
+        color='Condition',
+        hover_data=['Label'],
+        labels={'color': 'Condition'},
+        title=f'3D UMAP Projection - Filtered Data (n_neighbors={args.n_neighbors}, min_dist={args.min_dist}, metric={args.metric})'
+    )
+    fig_filtered.update_traces(marker=dict(size=3))
+    fig_filtered.update_layout(width=1000, height=800)
+    html_file_filtered = f'{results_dir}/latent_space_umap_{model_name}_filtered_data.html'
+    fig_filtered.write_html(html_file_filtered)
+    print(f"💾 Plot with filtered data saved to '{html_file_filtered}'")
+
+    print("\n🎉 Latent space visualization with clustering complete! 🎉")
 
 if __name__ == '__main__':
     main()

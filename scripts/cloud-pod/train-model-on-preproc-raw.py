@@ -1,4 +1,4 @@
-# scripts/train_model.py
+# scripts/train-model-on-preproc-raw.py
 
 # Place this at the very top of your script to limit the number of threads
 import os
@@ -13,7 +13,6 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pathlib
-from mne.preprocessing import compute_current_source_density
 from sklearn.model_selection import train_test_split
 import torch.nn as nn
 import sys
@@ -27,39 +26,50 @@ from torch.cuda.amp import GradScaler, autocast
 from multiprocessing import cpu_count
 
 # Import utility functions
-from utils import chunk_data, extract_phase, ConvLSTMEEGAutoencoder
+from utils import extract_phase, ConvLSTMEEGAutoencoder
 
 class EEGDataset(Dataset):
-    def __init__(self, file_paths, transform=None):
+    def __init__(self, file_paths, filter_low, filter_high, transform=None, max_length=1250):
         self.file_paths = file_paths
+        self.filter_low = filter_low
+        self.filter_high = filter_high
         self.transform = transform
+        self.max_length = max_length
 
     def __len__(self):
         return len(self.file_paths)
 
     def __getitem__(self, idx):
         data = np.load(self.file_paths[idx])
+        # Apply filtering
+        filtered_data = mne.filter.filter_data(data, sfreq=250, l_freq=self.filter_low, h_freq=self.filter_high)
+        # Extract phase
+        phase_data = extract_phase(filtered_data)
+        # Pad or truncate to max_length
+        if phase_data.shape[1] < self.max_length:
+            pad_width = ((0, 0), (0, self.max_length - phase_data.shape[1]))
+            phase_data = np.pad(phase_data, pad_width, mode='constant', constant_values=0)
+        else:
+            phase_data = phase_data[:, :self.max_length]
         if self.transform:
-            data = self.transform(data)
+            phase_data = self.transform(phase_data)
         # Scale the phase data from [-π, π] to [-1, 1]
-        data = data / np.pi  # Normalizing phase to [-1, 1]
-        return torch.tensor(data, dtype=torch.float32)
+        phase_data = phase_data / np.pi
+        return torch.tensor(phase_data, dtype=torch.float32)
 
 # Disable MNE info messages
 mne.set_log_level('ERROR')
 
 def parse_args():
     args = {
-        'n_subjects_per_group': 100,
         'batch_size': 64,
-        'chunk_duration': 5.0,
         'hidden_size': 64,
         'num_epochs': 6000,
         'epsilon': np.pi / 16,
         'complexity': 2,
         'checkpoint_frequency': 50,
         'filter_low': 3.0,
-        'filter_high': 7.0,
+        'filter_high': 16.0,
         'use_threshold': False,
         'wandb_project': "EEG-Autoencoder"
     }
@@ -68,9 +78,9 @@ def parse_args():
         if '=' in arg:
             key, value = arg.split('=')
             if key in args:
-                if key in ['n_subjects_per_group', 'batch_size', 'hidden_size', 'num_epochs', 'complexity', 'checkpoint_frequency']:
+                if key in ['batch_size', 'hidden_size', 'num_epochs', 'complexity', 'checkpoint_frequency']:
                     args[key] = int(value)
-                elif key in ['chunk_duration', 'epsilon', 'filter_low', 'filter_high']:
+                elif key in ['epsilon', 'filter_low', 'filter_high']:
                     args[key] = float(value)
     return args
 
@@ -79,78 +89,6 @@ def print_memory_usage():
     ram_memory = psutil.virtual_memory().used / 1024**2
     print(f"GPU Memory Usage: {gpu_memory:.2f} MB")
     print(f"RAM Usage: {ram_memory:.2f} MB")
-
-def preprocess_subject(args, metadata_list):
-    subject, group_name, output_dir, chunk_duration, filter_low, filter_high = args
-    sfreq = None
-    file_paths = []
-    files = [f for f in subject.glob('**/*_good_*_eeg.fif') if not f.name.startswith('._')]
-    print(f"Subject '{subject.name}' has {len(files)} files.")
-    if len(files) == 0:
-        print(f"⚠️ Warning: No data files found for subject '{subject.name}'.")
-    for file in files:
-        try:
-            raw = mne.io.read_raw_fif(file, preload=True, verbose=False)
-            raw = raw.filter(l_freq=filter_low, h_freq=filter_high, n_jobs=1)
-            raw = compute_current_source_density(raw)
-            data = raw.get_data()
-            sfreq = raw.info['sfreq']
-            chunks = chunk_data(data, sfreq, chunk_duration=chunk_duration)
-            for i, chunk in enumerate(chunks):
-                phase_chunk = extract_phase(chunk)
-                file_name = f"{group_name}_{subject.name}_{file.stem}_{i}.npy"
-                file_path = os.path.join(output_dir, file_name)
-                np.save(file_path, phase_chunk)
-                file_paths.append(file_path)
-                
-                # Collect metadata
-                metadata_list.append({
-                    'chunk_file': file_path,
-                    'original_fif_file': str(file),
-                    'group': group_name,
-                    'subject': subject.name,
-                    'file_stem': file.stem,
-                    'chunk_index': i
-                })
-        except Exception as e:
-            print(f"⚠️ Warning: Failed to process file {file}: {e}")
-    return file_paths, sfreq
-
-def preprocess_and_save_data(group_dirs, n_subjects_per_group, output_dir, chunk_duration=5.0, filter_low=3.0, filter_high=40.0, metadata_list=None):
-    os.makedirs(output_dir, exist_ok=True)
-    all_file_paths = []
-    sfreq = None
-
-    if metadata_list is None:
-        metadata_list = []
-    
-    args_list = []
-    for group_name, group_dir in group_dirs.items():
-        filt_dir = group_dir / 'FILT'
-        if not filt_dir.exists():
-            print(f"⚠️ Warning: FILT directory does not exist for group '{group_name}' at path '{filt_dir}'.")
-            continue
-        subject_folders = [f for f in filt_dir.glob('*') if f.is_dir()]
-        print(f"Group '{group_name}' has {len(subject_folders)} subjects.")
-        if len(subject_folders) == 0:
-            print(f"⚠️ Warning: No subject folders found in {filt_dir}.")
-        subject_folders = subject_folders[:n_subjects_per_group]
-        for subject in subject_folders:
-            args_list.append((subject, group_name, output_dir, chunk_duration, filter_low, filter_high))
-    
-    total_subjects = len(args_list)
-    if total_subjects == 0:
-        print("❌ No subjects found to process. Please check your data directories and glob patterns.")
-        sys.exit(1)
-    
-    print(f"Total subjects to process: {total_subjects}")
-    
-    # Process subjects sequentially
-    for args in tqdm(args_list, desc="Processing subjects"):
-        file_paths, sfreq = preprocess_subject(args, metadata_list)
-        all_file_paths.extend(file_paths)
-    
-    return all_file_paths, sfreq
 
 def load_or_initialize_model(model, model_path):
     if os.path.exists(model_path):
@@ -231,44 +169,17 @@ def save_checkpoint(model, optimizer, epoch, loss, args, model_path):
         'loss': loss,
         'args': args
     }
-    
-    # Create a more informative checkpoint filename
-    checkpoint_name = (f"checkpoint_epoch_{epoch}_"
-                       f"loss_{loss:.4f}_"
-                       f"lr_{optimizer.param_groups[0]['lr']:.6f}_"
-                       f"fl{args['filter_low']}_fh{args['filter_high']}_"
-                       f"hs{args['hidden_size']}_"
-                       f"eps{args['epsilon']:.4f}_"
-                       f"{time.strftime('%Y%m%d_%H%M%S')}.pth")
-    
-    checkpoint_path = os.path.join(os.path.dirname(model_path), checkpoint_name)
+    checkpoint_path = f"{model_path[:-4]}_checkpoint_epoch_{epoch}_{time.strftime('%Y%m%d_%H%M%S')}.pth"
     torch.save(checkpoint, checkpoint_path)
     print(f"💾 Checkpoint saved to '{checkpoint_path}'")
-    
-    # Log checkpoint information to wandb
-    # if 'WANDB_DISABLED' not in os.environ:
-    try:
-        # Log checkpoint details as a text file
-        checkpoint_info = (f"Epoch: {epoch}\n"
-                            f"Loss: {loss:.4f}\n"
-                            f"Learning Rate: {optimizer.param_groups[0]['lr']:.6f}\n"
-                            f"Filter Low: {args['filter_low']}\n"
-                            f"Filter High: {args['filter_high']}\n"
-                            f"Hidden Size: {args['hidden_size']}\n"
-                            f"Epsilon: {args['epsilon']:.4f}\n"
-                            f"Checkpoint Path: {checkpoint_path}")
-        
-        wandb.log({"checkpoint_info": wandb.Html(checkpoint_info)})
-        
-        # Optionally, save the checkpoint as an artifact
-        artifact = wandb.Artifact(f"model-checkpoint-epoch-{epoch}", type="model")
-        artifact.add_file(checkpoint_path)
-        wandb.log_artifact(artifact)
-        
-        print(f"✅ Checkpoint information logged to wandb")
-    except Exception as e:
-        print(f"⚠️ Warning: Failed to log checkpoint information to wandb: {e}")
 
+def custom_collate(batch):
+    # Find the minimum length in the batch
+    min_length = min([item.shape[1] for item in batch])
+    # Truncate all items to the minimum length
+    batch = [item[:, :min_length] for item in batch]
+    # Stack the batch
+    return torch.stack(batch)
 
 def main():
     print("\n🚀 Welcome to the EEG Model Trainer! 👩‍💻👨‍💻\n")
@@ -277,7 +188,7 @@ def main():
     load_dotenv()
 
     # Initialize wandb
-    wandb_api_key = "a32849d94af9c711d39d425741579db87e1f192c"
+    wandb_api_key = os.getenv("WANDB_API_KEY")
     if wandb_api_key:
         wandb.login(key=wandb_api_key)
         try:
@@ -295,65 +206,37 @@ def main():
         wandb.config.update(args)
 
     # Set the paths
-    data_dir = pathlib.Path('/workspace/MatrixAutoEncoder/data')
-    print(f"📂 Data directory: {data_dir}")
-    group_dirs = {
-        'AD': data_dir / 'AD',
-        'HID': data_dir / 'HID',
-        'MCI': data_dir / 'MCI'
-    }
+    preprocessed_dir = pathlib.Path('/workspace/MatrixAutoEncoder/preprocessed_data')
+    print(f"📂 Preprocessed data directory: {preprocessed_dir}")
 
-    output_dir = '/workspace/MatrixAutoEncoder/preprocessed_data'
-
-    # Check if preprocessed data exists
-    if os.path.exists(output_dir) and len(os.listdir(output_dir)) > 0:
-        print("🗂️ Preprocessed data already exists. Skipping preprocessing.")
-        # Collect all file paths
-        file_paths = [os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.npy')]
-        sfreq = 250  # Set your sampling frequency accordingly
-    else:
-        # Preprocess data and get file paths
-        import pandas as pd
-
-        metadata_list = []
-        
-        print(f"📊 Preprocessing and saving data... - setting fmin: {args['filter_low']} - fmax: {args['filter_high']}")
-        file_paths, sfreq = preprocess_and_save_data(
-            group_dirs=group_dirs,
-            n_subjects_per_group=args['n_subjects_per_group'],
-            output_dir=output_dir,
-            chunk_duration=args['chunk_duration'],
-            filter_low=args['filter_low'],
-            filter_high=args['filter_high'],
-            metadata_list=metadata_list  # Pass the metadata list to the function
-        )
-        
-        # After preprocessing, create a DataFrame from metadata_list and save it
-        metadata_df = pd.DataFrame(metadata_list)
-        metadata_csv_path = os.path.join(output_dir, 'chunk_metadata.csv')
-        metadata_df.to_csv(metadata_csv_path, index=False)
-        print(f"💾 Metadata CSV saved to '{metadata_csv_path}'")
+    # Collect all file paths
+    file_paths = [str(f) for f in preprocessed_dir.glob('*.npy')]
+    if not file_paths:
+        print("❌ No preprocessed data found. Please run the preprocessing script first.")
+        sys.exit(1)
 
     # Split file paths into training and testing
     train_files, test_files = train_test_split(file_paths, test_size=0.2, random_state=42)
 
     # Create Datasets and DataLoaders
     batch_size = args['batch_size']
-    train_dataset = EEGDataset(train_files)
-    test_dataset = EEGDataset(test_files)
+    train_dataset = EEGDataset(train_files, args['filter_low'], args['filter_high'])
+    test_dataset = EEGDataset(test_files, args['filter_low'], args['filter_high'])
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=min(8, cpu_count()),  # Adjust based on your CPU cores
-        pin_memory=True
+        num_workers=min(8, cpu_count()),
+        pin_memory=True,
+        collate_fn=custom_collate
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=min(8, cpu_count()),
-        pin_memory=True
+        pin_memory=True,
+        collate_fn=custom_collate
     )
 
     print(f"🧮 Batch size: {batch_size}")
@@ -440,7 +323,7 @@ def main():
 
                         # Create and log visualization
                         try:
-                            fig = plot_sample_and_reconstruction(batch[0], reconstructed[0], recurrence_matrix[0], sfreq=sfreq)
+                            fig = plot_sample_and_reconstruction(batch[0], reconstructed[0], recurrence_matrix[0], sfreq=250)
                             wandb.log({"sample_visualization": wandb.Image(fig)})
                             plt.close(fig)
                         except Exception as e:
@@ -459,7 +342,6 @@ def main():
         # Save checkpoint
         if (epoch + 1) % args['checkpoint_frequency'] == 0:
             save_checkpoint(model, optimizer, epoch + 1, avg_train_loss, args, model_path)
-
 
     # Save the trained model
     torch.save(model.state_dict(), model_path)

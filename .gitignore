@@ -28,3 +28,5 @@ wandb
 *.env
 *.mp4
 *.cpython-310.pyc
+doc/image/*
+*.html
