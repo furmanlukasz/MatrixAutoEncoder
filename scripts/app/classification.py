@@ -12,7 +12,7 @@ from sklearn.svm import SVC
 import xgboost as xgb
 import matplotlib.pyplot as plt
 import seaborn as sns
-from joypy import joyplot
+# from joypy import joyplot
 
 def classification(input_csv, output_dir='results/classification', selected_features=None, selected_classifiers=None):
     """
