@@ -75,7 +75,7 @@ Use the following make commands to run different parts of the pipeline:
 - `make visualize_model_architecture`: Visualize the model architecture.
 - `make signal_analysis`: Run signal analysis on the data.
 
-![Pipeline](./doc/image/eeg-autoencoder/pipe.png)
+![Pipeline](./doc/pipe.png)
 ## Latent Space Visualization
 
 The latent space visualization creates a 3D point cloud using UMAP, with labels representing different conditions (AD, HID, MCI). This allows you to observe how the model learns to represent the data samples over time.
