@@ -5,10 +5,12 @@ import plotly.io as pio
 import streamlit.components.v1 as components
 
 # Import the refactored functions
-from cluster_transform import cluster_transform
-from classification import classification
-from classification_auc import classification_auc
+from cluster_transform import cluster_transform as perform_clustering
+from classification import classification as perform_classification
+from classification_auc import classification_auc as compute_classification_auc
 from grid_search_heatmap import grid_search_heatmap as perform_grid_search
+from scripts.app.abstract import abstract as generate_abstract
+from scripts.app.results import generate_markdown
 
 # State management
 st.set_page_config(layout="wide") 
@@ -18,7 +20,7 @@ def main():
     st.title("Matrix AutoEncoder Analysis Dashboard")
 
     st.sidebar.title("Navigation")
-    options = ["DataFrame Selection & Visualization", "Clustering", "Classification", "Statistics & AUC", "Grid Search Heatmap"]
+    options = ["DataFrame Selection & Visualization", "Clustering", "Classification", "Statistics & AUC", "Grid Search Heatmap", "Abstract", "Results"]
     choice = st.sidebar.radio("Go to", options)
 
     if choice == "DataFrame Selection & Visualization":
@@ -31,6 +33,90 @@ def main():
         statistics_and_auc_computation()
     elif choice == "Grid Search Heatmap":
         grid_search_heatmap()
+    elif choice == "Abstract":
+        abstract_from_md()
+    elif choice == "Results":
+        display_results()
+
+
+def display_results():
+    st.header("Results")
+    
+    if st.button("Generate Results"):
+        with st.spinner("Generating results..."):
+            # Find the most recent output directories
+            classification_dir = find_most_recent_dir("scripts/app/results/classification")
+            grid_search_dir = find_most_recent_dir("scripts/app/results/grid_search")
+            stats_dir = find_most_recent_dir("scripts/app/results/stats")
+            
+            if not all([classification_dir, grid_search_dir, stats_dir]):
+                st.error("Some result directories are missing. Please run all previous steps first.")
+                return
+            
+            # Load and prepare data
+            classification_results = pd.read_csv(os.path.join(classification_dir, "classification_results.csv"))
+            grid_search_results = pd.read_csv(os.path.join(grid_search_dir, "grid_search_results.csv"))
+            xgboost_auc_results = pd.read_csv(os.path.join(stats_dir, "xgboost_auc_results.csv"))
+            
+            # Prepare data for markdown generation
+            classification_perf = classification_results.to_markdown()
+            grid_search_summary = grid_search_results.describe().to_markdown()
+            xgboost_auc = xgboost_auc_results['auc'].values[0]
+            
+            # Generate markdown content
+            markdown_content = generate_markdown(
+                classification_perf=classification_perf,
+                grid_search_summary=grid_search_summary,
+                xgboost_auc=xgboost_auc
+            )
+            
+            # Save the generated markdown
+            results_dir = os.path.join("scripts", "app", "results")
+            os.makedirs(results_dir, exist_ok=True)
+            file_path = os.path.join(results_dir, "results.md")
+            
+            from scripts.app.results import save_markdown
+            save_markdown(markdown_content, file_path)
+            
+            st.success("Results generated successfully!")
+
+        # Display the generated markdown
+        st.markdown(markdown_content, unsafe_allow_html=True)
+        
+        # Display images
+        st.subheader("Additional Visualizations")
+        ridgeline_plot = os.path.join(classification_dir, "ridgeline_plot.png")
+        auc_heatmap = os.path.join(grid_search_dir, "heatmap_auc.png")
+        accuracy_heatmap = os.path.join(grid_search_dir, "heatmap_accuracy.png")
+        roc_curve = os.path.join(stats_dir, "roc_curve.png")
+        
+        for img_path, caption in [
+            (ridgeline_plot, "Ridgeline Plot"),
+            (auc_heatmap, "AUC Heatmap"),
+            (accuracy_heatmap, "Accuracy Heatmap"),
+            (roc_curve, "ROC Curve")
+        ]:
+            if os.path.exists(img_path):
+                st.image(img_path, caption=caption)
+            else:
+                st.warning(f"{caption} not found. Please ensure all steps have been completed.")
+    else:
+        # Load and display existing results if available
+        results_file = os.path.join("scripts", "app", "results", "results.md")
+        if os.path.exists(results_file):
+            with open(results_file, 'r') as f:
+                existing_content = f.read()
+            st.markdown(existing_content, unsafe_allow_html=True)
+        else:
+            st.info("Click the 'Generate Results' button to create and display the results.")
+            
+def find_most_recent_dir(base_path):
+    if not os.path.exists(base_path):
+        return None
+    dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
+    if not dirs:
+        return None
+    return os.path.join(base_path, max(dirs, key=lambda x: os.path.getmtime(os.path.join(base_path, x))))
 
 def dataframe_selection_and_visualization():
     st.header("Step 1: DataFrame Selection & Visualization")
@@ -103,7 +189,7 @@ def clustering():
             
             # Perform clustering
             with st.spinner("Performing clustering..."):
-                result = cluster_transform(
+                result = perform_clustering(
                     input_csv=dataframe_csv_path,
                     eps=eps,
                     min_samples=min_samples,
@@ -166,7 +252,7 @@ def classification_section():
 
         if st.button("Run Classification"):
             with st.spinner("Performing classification..."):
-                results = classification(
+                results = perform_classification(
                     input_csv=clustered_csv_path,
                     output_dir=output_dir,
                     selected_features=selected_features,
@@ -216,7 +302,7 @@ def statistics_and_auc_computation():
         if st.button("Run Statistics"):
             stats_output_dir = os.path.join("scripts/app/results/stats", selected_dataframe)
             with st.spinner("Computing statistics..."):
-                stats_results = classification_auc(
+                stats_results = compute_classification_auc(
                     input_csv=clustered_csv_path,
                     output_dir=stats_output_dir
                 )
@@ -271,6 +357,10 @@ def grid_search_heatmap():
             st.image(acc_heatmap, caption="Accuracy Heatmap", use_column_width=True)
         else:
             st.warning("Heatmap images not found. Please run the grid search first.")
+
+def abstract_from_md():
+    # Example content from abstract_and_conclusion.py
+    generate_abstract()
 
 if __name__ == "__main__":
     main()

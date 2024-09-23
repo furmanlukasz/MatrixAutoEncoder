@@ -42,3 +42,6 @@ classification_auc:
 
 c_stats:
 	cd $(PROJECT_DIR) && $(PYTHON_ENV) scripts/c_stats.py --input_csv $(PROJECT_DIR)/results/rqa_features_all.csv --output_dir $(PROJECT_DIR)/results/stats
+
+run_streamlit:
+	cd $(PROJECT_DIR) && $(PYTHON_ENV) -m streamlit run scripts/app/app.py
