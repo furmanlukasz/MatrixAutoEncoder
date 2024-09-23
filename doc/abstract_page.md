@@ -2,13 +2,13 @@
 
 ## Abstract
 
-Analyzing resting-state electroencephalogram (EEG) data presents significant challenges due to the absence of explicit events and high susceptibility to noise, making it difficult to identify informative signal segments. This study proposes a method that leverages an autoencoder architecture to learn latent representations from multichannel EEG phase data. By constructing angular distance matrices from the latent space and applying dimensionality reduction techniques such as UMAP, temporal patterns indicative of different cognitive states are highlighted. Additionally, advanced statistical analyses, including Recurrence Quantification Analysis (RQA) feature computation, classification using Group Shuffle Split, and clustering with DBSCAN, are integrated to provide a comprehensive understanding of the underlying neural dynamics. This approach addresses the complexities inherent in traditional recurrence quantification analysis (RQA) by providing a data-driven embedding without extensive hyperparameter tuning. It facilitates informed decisions on segment selection for analysis and offers insights into the underlying neural dynamics in resting-state EEG interpretation.
+Analyzing resting-state electroencephalogram (EEG) data presents significant challenges due to the absence of explicit events and high susceptibility to noise, making it difficult to identify informative signal segments. This study proposes a method that leverages an autoencoder architecture to learn latent representations from multichannel EEG phase data. By constructing angular distance matrices from the latent space and applying dimensionality reduction techniques such as UMAP, temporal patterns indicative of different cognitive states are highlighted. Advanced statistical analyses, including Recurrence Quantification Analysis (RQA) feature computation, classification using XGBoost with Group Shuffle Split, and clustering with DBSCAN, are integrated to provide a comprehensive understanding of the underlying neural dynamics. This approach addresses the complexities inherent in traditional RQA by providing a data-driven embedding without extensive hyperparameter tuning. It facilitates informed decisions on segment selection for analysis and offers insights into the underlying neural dynamics in resting-state EEG interpretation.
 
 ## 1. Introduction
 
 Resting-state EEG is a valuable tool for investigating the intrinsic functional architecture of the brain. However, analyzing resting-state EEG signals is complicated by the lack of task-related events and high susceptibility to noise and artifacts. Traditional methods often struggle to determine which segments of the signal are most informative, potentially leading to biases or omission of critical information.
 
-Recurrence quantification analysis (RQA) provides a framework for analyzing the dynamical properties of time-series data by constructing recurrence matrices that reveal patterns of recurrence in the system's phase space. A significant challenge in RQA is determining appropriate embeddings for constructing these matrices. Time-delay embeddings, for instance, introduce hyperparameters such as time delay $\tau$ and embedding dimension $m$, which require careful selection. The optimal values for these parameters are often unknown, especially for complex, high-dimensional systems like multichannel EEG, where the attractor's structure in phase space is not well-defined.
+Recurrence Quantification Analysis (RQA) provides a framework for analyzing the dynamical properties of time-series data by constructing recurrence matrices that reveal patterns of recurrence in the system's phase space. A significant challenge in RQA is determining appropriate embeddings for constructing these matrices. Time-delay embeddings, for instance, introduce hyperparameters such as time delay $\tau$ and embedding dimension $m$, which require careful selection. The optimal values for these parameters are often unknown, especially for complex, high-dimensional systems like multichannel EEG, where the attractor's structure in phase space is not well-defined.
 
 Alternative embedding methods, such as those based on short-time Fourier transform (STFT) spectrograms, also introduce parameters that influence temporal resolution and frequency content, potentially affecting the analysis. The choice of embedding thus becomes a critical factor that can introduce biases and affect the interpretability of the results.
 
@@ -20,7 +20,7 @@ The hypothesis explored in this study is that the latent space learned by an aut
 
 ### 2.1 Participants
 
-*Placeholder for participant demographics, inclusion criteria, and ethical considerations.*
+The detailed steps for preprocessing the EEG data can be found in the [previous report preproc02](web-MCI-preproc02.html) and [previous report model01](web-MCI-model01.html). 
 
 ### 2.2 Data Acquisition and Preprocessing
 
@@ -28,15 +28,15 @@ EEG data were recorded from $N$ subjects, each comprising $C$ channels and $T$ t
 
 1. **Bandpass Filtering**: A bandpass filter was applied to remove low-frequency drifts and high-frequency noise:
 
-   $\mathbf{x}^{(i)}_{\text{filtered}} = \text{Bandpass}(\mathbf{x}^{(i)})$
+   $$\mathbf{x}^{(i)}_{\text{filtered}} = \text{Bandpass}(\mathbf{x}^{(i)})$$
 
 2. **Laplacian Referencing**: To enhance spatial resolution and minimize volume conduction effects, a surface Laplacian transformation was applied:
 
-   $\tilde{\mathbf{x}}^{(i)} = \text{Laplacian}( \mathbf{x}^{(i)}_{\text{filtered}} )$
+   $$\tilde{\mathbf{x}}^{(i)} = \text{Laplacian}( \mathbf{x}^{(i)}_{\text{filtered}} )$$
 
 3. **Phase Extraction**: The instantaneous phase information was extracted using the Hilbert transform, capturing the timing of neural oscillations:
 
-   $\phi^{(i)} = \arg( \text{Hilbert}( \tilde{\mathbf{x}}^{(i)} ) ), \quad \phi^{(i)} \in [-\pi, \pi]^{C \times T}$
+   $$\phi^{(i)} = \arg( \text{Hilbert}( \tilde{\mathbf{x}}^{(i)} ) ), \quad \phi^{(i)} \in [-\pi, \pi]^{C \times T}$$
 
 4. **Segmentation**: The continuous phase data were segmented into fixed-duration chunks of 5 seconds to capture temporal dynamics while managing computational load.
 
@@ -44,7 +44,7 @@ EEG data were recorded from $N$ subjects, each comprising $C$ channels and $T$ t
 
 An autoencoder with an encoder-decoder structure was designed to learn compressed, data-driven embeddings of the multichannel EEG phase data.
 
-![Model Architecture](model.png)
+![Model Architecture](../doc/image/eeg-autoencoder/model.png)
 
 **Figure 1.** Model Architecture
 
@@ -54,13 +54,13 @@ The encoder compresses the high-dimensional input $\phi^{(i)}$ into a lower-dime
 
 1. **Convolutional Layers**: Spatial features across all electrodes were captured:
 
-   $\mathbf{h}_{\text{conv}}^{(i)} = f_{\text{conv}}( \phi^{(i)} ), \quad \mathbf{h}_{\text{conv}}^{(i)} \in \mathbb{R}^{F \times T}$
+   $$\mathbf{h}_{\text{conv}}^{(i)} = f_{\text{conv}}( \phi^{(i)} ), \quad \mathbf{h}_{\text{conv}}^{(i)} \in \mathbb{R}^{F \times T}$$
 
    where $F$ denotes the number of feature maps.
 
 2. **Long Short-Term Memory (LSTM) Layer**: Temporal dependencies in the data were modeled:
 
-   $\mathbf{h}_{\text{lstm}}^{(i)} = f_{\text{lstm}}( \mathbf{h}_{\text{conv}}^{(i)} ), \quad \mathbf{h}_{\text{lstm}}^{(i)} \in \mathbb{R}^{T' \times H}$
+   $$\mathbf{h}_{\text{lstm}}^{(i)} = f_{\text{lstm}}( \mathbf{h}_{\text{conv}}^{(i)} ), \quad \mathbf{h}_{\text{lstm}}^{(i)} \in \mathbb{R}^{T' \times H}$$
 
    where $H$ is the hidden size of the LSTM layer, and $T'$ represents the length of the encoded sequence, which may differ from $T$ due to downsampling or other transformations within the network.
 
@@ -72,25 +72,43 @@ The decoder reconstructs the input data from the latent representation:
 
 1. **LSTM Layer**:
 
-   $\hat{\mathbf{h}}_{\text{lstm}}^{(i)} = f_{\text{lstm\_dec}}( \mathbf{h}_{\text{lstm}}^{(i)} )$
+   $$\hat{\mathbf{h}}_{\text{lstm}}^{(i)} = f_{\text{lstm\_dec}}( \mathbf{h}_{\text{lstm}}^{(i)} )$$
 
 2. **Deconvolutional Layers**:
 
-   $\hat{\phi}^{(i)} = f_{\text{deconv}}( \hat{\mathbf{h}}_{\text{lstm}}^{(i)} ), \quad \hat{\phi}^{(i)} \in [-\pi, \pi]^{C \times T}$
+   $$\hat{\phi}^{(i)} = f_{\text{deconv}}( \hat{\mathbf{h}}_{\text{lstm}}^{(i)} ), \quad \hat{\phi}^{(i)} \in [-\pi, \pi]^{C \times T}$$
 
 #### Training Objective
 
 The autoencoder was trained to minimize the reconstruction loss between the input and the reconstructed output:
 
-$\mathcal{L}_{\text{recon}} = \frac{1}{N} \sum_{i=1}^N \left\| \phi^{(i)} - \hat{\phi}^{(i)} \right\|_2^2$
+$$\mathcal{L}_{\text{recon}} = \frac{1}{N} \sum_{i=1}^N \left\| \phi^{(i)} - \hat{\phi}^{(i)} \right\|_2^2$$
 
-### 2.4 Recurrence Quantification Analysis (RQA) Feature Computation
+### 2.4 Angular Distance Matrix and Recurrence Matrix Construction
 
-To quantify the dynamical properties of the EEG signals, Recurrence Quantification Analysis (RQA) was employed. The procedure involves constructing recurrence matrices from the latent representations and extracting relevant RQA features.
+Before performing Recurrence Quantification Analysis, angular distance matrices were constructed from the latent space representations to capture temporal patterns.
 
-1. **Recurrence Matrix Construction**: For each latent space representation $\mathbf{h}_{\text{lstm}}^{(i)}$, an angular distance matrix $D^{(i)}$ was computed to capture temporal similarities.
+1. **Angular Distance Matrix**: For each latent representation $\mathbf{h}_{\text{lstm}}^{(i)}$, an angular distance matrix $D^{(i)}$ was computed:
 
-2. **Feature Extraction**: From each recurrence matrix, the following RQA features were extracted:
+   $$D^{(i)}_{jk} = \cos^{-1}\left( \frac{ \mathbf{h}_{\text{lstm}}^{(i)}(j) \cdot \mathbf{h}_{\text{lstm}}^{(i)}(k) }{ \|\mathbf{h}_{\text{lstm}}^{(i)}(j)\| \|\mathbf{h}_{\text{lstm}}^{(i)}(k)\| } \right)$$
+
+2. **Thresholding for Recurrence Matrix**: To obtain a binary recurrence matrix, the 85th percentile of the angular distance distribution was computed:
+
+   $$\varepsilon = \text{Percentile}( D^{(i)}, 85 )$$
+
+   The recurrence matrix $R^{(i)}$ was then defined as:
+
+   $$R^{(i)}_{jk} = \begin{cases} 1 & \text{if } D^{(i)}_{jk} \leq \varepsilon \\ 0 & \text{otherwise} \end{cases}$$
+
+   This process preserves the 15% of the most significant recurrences, highlighting the most relevant temporal patterns while reducing noise.
+
+
+### 2.5 Recurrence Quantification Analysis (RQA) Feature Computation
+
+Recurrence Quantification Analysis was performed on the recurrence matrices to quantify the dynamical properties of the EEG signals.
+
+1. **Feature Extraction**: From each recurrence matrix $R^{(i)}$, the following RQA features were extracted:
+
    - **RR**: Recurrence Rate
    - **DET**: Determinism
    - **L**: Average diagonal line length
@@ -100,100 +118,148 @@ To quantify the dynamical properties of the EEG signals, Recurrence Quantificati
    - **TT**: Trapping Time
    - **Vmax**: Maximum vertical line length
 
-### 2.5 Classification Procedures
+These features provide a quantitative description of the temporal dynamics within the EEG signals.
 
-Classification tasks were performed to evaluate the discriminative power of the RQA features.
+### 2.6 Latent Representation and UMAP Projection
 
-1. **Data Preparation**: 
+To visualize the data and perform clustering for segment selection, the latent representations were projected using UMAP.
+
+1. **Feedforward Pass**: A feedforward pass was performed using the trained autoencoder to obtain the latent representations $\mathbf{h}_{\text{lstm}}^{(i)}$ for all data segments.
+
+2. **UMAP Projection**: The high-dimensional latent vectors were projected into a three-dimensional space using UMAP for visualization:
+
+   $$\mathbf{u}^{(i)} = \text{UMAP}( \mathbf{h}_{\text{lstm}}^{(i)} )$$
+
+### 2.7 Clustering and Segment Selection
+
+Clustering was applied to the UMAP-projected data to identify and select signal segments that are specific to particular conditions.
+
+1. **Clustering Algorithm**: DBSCAN was utilized on the UMAP-projected data to identify clusters:
+
+   - **Unfiltered UMAP Projection**: The UMAP projection represents the latent vectors in a 3D space without any filtering.
+
+2. **Filtered Clustering**: Segments that overlapped with multiple conditions were excluded, resulting in a filtered dataset containing only the segments of interest.
+
+### 2.8 Classification Procedures
+
+Classification tasks were performed to evaluate the discriminative power of the RQA features extracted from the filtered data.
+
+1. **Data Preparation**:
+
    - **Feature Selection**: RQA features ['RR', 'DET', 'L', 'Lmax', 'ENTR', 'LAM', 'TT', 'Vmax'] were selected as input variables.
    - **Label Encoding**: Categorical condition labels were encoded into numerical values.
-   - **Scaling**: Features were standardized using `StandardScaler` to ensure they contribute equally to the model performance.
+   - **Scaling**: Features were standardized using `StandardScaler`.
 
 2. **Group Shuffle Split**:
-   - To maintain the independence of subjects between training and testing sets, `GroupShuffleSplit` was utilized. This method ensures that all samples from a single subject are confined to either the training or testing set, preventing data leakage and ensuring a more realistic evaluation of model performance.
+
+   - Ensured that all samples from a single subject were confined to either the training or testing set, preventing data leakage.
 
 3. **Model Training and Evaluation**:
-   - **Algorithms Employed**:
-     - Random Forest
-     - Support Vector Machine (SVM)
-     - XGBoost
-   - **Metrics**: Accuracy, F1 Score, and Area Under the Curve (AUC) were computed to assess model performance.
-   - **ROC Curves**: Receiver Operating Characteristic (ROC) curves were plotted to visualize the trade-off between true positive rates and false positive rates for each class.
 
-### 2.6 Clustering and Visualization
-
-Cluster analysis was performed on the latent space representations to identify distinct patterns corresponding to different cognitive states.
-
-1. **Dimensionality Reduction**: UMAP was applied to project the high-dimensional latent vectors into a three-dimensional space for visualization.
-
-2. **Clustering Algorithm**: DBSCAN was utilized to identify clusters within the UMAP-projected data, allowing for the detection of arbitrarily shaped clusters without requiring the number of clusters to be specified a priori.
-
-3. **Visualization**: 3D scatter plots were generated to visualize the clustering results, highlighting the separation or overlap between different cognitive states.
+   - **Algorithm**: XGBoost
+   - **Metrics**: Accuracy, F1 Score, and Area Under the Curve (AUC) were computed.
+   - **ROC Curve**: Plotted to visualize model performance.
 
 ## 3. Results
 
-### 3.1 RQA Feature Statistics
+### 3.1 Clustering Analysis
 
-A comprehensive statistical summary of the extracted RQA features was generated, providing insights into the distribution and central tendencies of each feature across different conditions.
+#### Unfiltered UMAP Projection
 
-![Correlation Heatmap](correlation_heatmap.png)
-**Figure 2.** Correlation Heatmap of RQA Features 
+Clustering on the full dataset revealed distinct groupings corresponding to various cognitive states.
 
-![Box Plot](boxplot_RR_by_condition.png)
-**Figure 3.** Box Plot of RQA Features by Condition  
+![UMAP Projection and Clustering Results - Unfiltered Data](../doc/image/eeg-autoencoder/umap_all.png)
 
-### 3.2 Classification Performance
+**Figure 2.** UMAP Projection and Clustering Results - Unfiltered Data
 
-Multiple classifiers were trained and evaluated using the RQA features. The results are summarized below:
+#### Filtered UMAP Projection
 
-- **Random Forest**:
-  - **Accuracy**: 0.6166
-  - **F1 Score**: 0.6015
+After excluding clusters with mixed conditions, the filtered UMAP projection highlighted the segments of interest for further analysis.
 
-- **Support Vector Machine (SVM)**:
-  - **Accuracy**: 0.5636
-  - **F1 Score**: 0.5088
+![UMAP Projection and Clustering Results - Filtered Data](../doc/image/eeg-autoencoder/umap_filtered.png)
+
+**Figure 3.** UMAP Projection and Clustering Results - Filtered Data with parameters: min_samples=4, eps=0.14
+
+### 3.2 Angular Distance and Recurrence Matrices
+
+The angular distance matrices revealed significant temporal patterns in the latent space representations.
+
+![Angular Distance Matrix](../doc/image/eeg-autoencoder/angular_distance.png)
+
+**Figure 4.** Angular Distance Matrix
+
+The binary recurrence matrix was constructed by thresholding at the 85th percentile, preserving 15% of the data.
+
+More examples of angular distance matrices can be found in the [wandb project](https://api.wandb.ai/links/lfurman_108/vsi8j4we).
+
+### 3.3 RQA Feature Statistics
+
+Statistical analysis of the extracted RQA features provided insights into the signal dynamics across different conditions.
+
+![RQA Feature Statistics](../doc/image/eeg-autoencoder/ridgeline_plot.png)
+
+**Figure 5.** RQA Feature Statistics - Ridgeline Plot
+
+### 3.4 Autoencoder Training Performance
+
+The autoencoder was trained on samples of two seconds in length. The model converged well without signs of overfitting, as indicated by the low reconstruction loss, which fell below 0.08.
+
+![Reconstruction of Phase Data](../doc/image/eeg-autoencoder/phase_data.png)
+
+**Figure 6.** Reconstruction of Phase Data - Loss
+
+### 3.5 Classification Performance
+
+Classification was performed on the RQA features extracted from the filtered dataset.
 
 - **XGBoost**:
-  - **Accuracy**: 0.6201
-  - **F1 Score**: 0.6071
+  - **Accuracy**: 0.80
+  - **F1 Score**: 0.80
+  - **AUC**: 0.93
 
-**Figure 4.** Receiver Operating Characteristic (ROC) Curve for XGBoost Classifier  
-![ROC Curve](../results/classification_auc/roc_curve.png)
+![ROC Curve](../doc/image/eeg-autoencoder/roc_curve.png)
 
-The XGBoost classifier demonstrated superior performance with an AUC of 0.90, indicating excellent discriminative ability between different cognitive states.
+**Figure 7.** Receiver Operating Characteristic (ROC) Curve for XGBoost Classifier
 
-### 3.3 Clustering Analysis
+The XGBoost classifier demonstrated strong performance, indicating that the RQA features effectively discriminate between different cognitive states.
 
-Cluster analysis revealed distinct groupings within the latent space, corresponding to different cognitive conditions.
+![Grid Search Results for XGBoost Classifier AUC](../doc/image/eeg-autoencoder/heatmap_auc.png)
 
-**Figure 5.** 3D UMAP Projection with DBSCAN Clusters  
-![UMAP Clusters](../cluster_results/latent_space_filtered_data.html)
+**Figure 8.** Grid Search Results for XGBoost Classifier AUC
 
-Clusters with mixed conditions were identified and excluded from further analysis to ensure the purity of condition-specific patterns.
+![Grid Search Results for XGBoost Classifier Accuracy](../doc/image/eeg-autoencoder/heatmap_accuracy.png)
+
+**Figure 9.** Grid Search Results for XGBoost Classifier Accuracy
 
 ## 4. Discussion
 
-Analyzing resting-state EEG data is fraught with challenges, particularly in constructing appropriate embeddings for recurrence quantification analysis. Traditional methods, such as time-delay embeddings, require the selection of hyperparameters like time delay $\tau$ and embedding dimension $m$, which can significantly influence results. The lack of consensus on optimal embedding parameters for multichannel EEG data introduces variability and potential biases into analysis.
+Analyzing resting-state EEG data is fraught with challenges, particularly in constructing appropriate embeddings for recurrence quantification analysis. Traditional methods, such as time-delay embeddings, require the selection of hyperparameters like time delay $\tau$ and embedding dimension $m$, which can significantly influence results. The lack of consensus on optimal embedding parameters for multichannel EEG data introduces variability and potential biases into the analysis.
 
 The approach presented addresses these challenges by utilizing an autoencoder to learn a data-driven embedding from EEG phase data. This method reduces dependence on hyperparameter selection inherent in traditional embeddings, as the autoencoder inherently captures essential features of the data through training.
 
-Recurrence Quantification Analysis (RQA) was employed to quantify the dynamical properties of the EEG signals. By computing features such as Recurrence Rate (RR), Determinism (DET), and Entropy (ENTR), among others, a comprehensive profile of the signal dynamics was obtained. The correlation heatmap revealed significant inter-feature relationships, informing subsequent classification tasks.
+By constructing angular distance matrices from the latent representations and applying thresholding at the 85th percentile, we preserved the most significant temporal patterns while reducing noise. This thresholding resulted in binary recurrence matrices suitable for RQA feature computation.
 
-Classification using Group Shuffle Split ensured that the training and testing sets were free from subject overlap, enhancing the generalizability of the models. The XGBoost classifier achieved the highest performance with an AUC of 0.90, demonstrating the effectiveness of RQA features in distinguishing between cognitive states.
+Recurrence Quantification Analysis provided a comprehensive profile of the signal dynamics. The RQA features extracted from the filtered segments, selected through clustering on the UMAP projections, exhibited strong discriminative power in classification tasks. The XGBoost classifier achieved an AUC of 0.93, demonstrating the effectiveness of the approach.
 
-Clustering analysis using DBSCAN on UMAP-projected latent vectors identified distinct groupings corresponding to different conditions. Excluding clusters with mixed conditions further refined the analysis, ensuring that the features employed for classification were condition-specific.
+Clustering analysis using DBSCAN on UMAP-projected latent vectors identified distinct groupings corresponding to different conditions. By excluding clusters with mixed conditions, we ensured that the features employed for classification were condition-specific, enhancing the robustness of the analysis.
 
-Overall, the integration of autoencoder-based embeddings, RQA feature extraction, robust classification techniques, and clustering analysis provides a multifaceted approach to uncovering temporal patterns in resting-state EEG data.
+When examining the grid search results, we observed numerous configurations yielding high area under the curve (AUC) and accuracy scores. However, it is crucial to remember that each grid search is performed for specific parameters, and the best scores are obtained for certain DBSCAN parameters. There is a trade-off, as some clusters may be too large, resulting in fewer samples and potentially limiting the model's ability to generalize. Despite this, the performance remains strong, but the generalizability may be compromised.
+
+Future steps could involve designing a more user-friendly interface for performing these analyses, including tests and sanity checks to ensure the preservation of the same number of subjects. It may also be beneficial to identify and handle outliers, such as subjects with conditions that deviate significantly from the norm. These enhancements could improve the robustness and applicability of the methodology.
+
+Overall, the integration of autoencoder-based embeddings, angular distance matrices, thresholding techniques, RQA feature extraction, robust classification, and clustering analysis provides a multifaceted approach to uncovering temporal patterns in resting-state EEG data.
 
 ## 5. Conclusion
 
-This report presents a methodology that integrates autoencoders with multivariate angular distance analysis and advanced statistical techniques to highlight temporal patterns in resting-state EEG data. By leveraging the autoencoder's ability to learn data-driven embeddings and employing Recurrence Quantification Analysis (RQA) for feature extraction, the approach addresses challenges associated with traditional embedding methods in RQA, reducing reliance on hyperparameter selection and potential biases.
+This study presents a methodology that integrates autoencoders with multivariate angular distance analysis and advanced statistical techniques to highlight temporal patterns in resting-state EEG data. By leveraging the autoencoder's ability to learn data-driven embeddings and constructing thresholded recurrence matrices, the approach addresses challenges associated with traditional embedding methods in RQA, reducing reliance on hyperparameter selection and potential biases.
 
-Classification analyses utilizing Group Shuffle Split validated the discriminative power of the extracted RQA features, with the XGBoost classifier achieving an AUC of 0.90. Clustering analyses further elucidated distinct patterns within the latent space, corresponding to different cognitive states.
+Clustering on UMAP-projected latent representations allowed for the selection of specific signal segments corresponding to distinct conditions. Classification analyses utilizing XGBoost validated the discriminative power of the extracted RQA features, achieving an AUC of 0.93.
 
 **Important Considerations**:
-While the autoencoder could be used for classification due to its representation learning, the primary focus is on guiding analysis and enhancing interpretability through standard EEG methods.
+
+- The autoencoder serves as a tool to guide analysis and enhance interpretability through standard EEG methods.
+- Thresholding at the 85th percentile effectively highlights significant temporal patterns while reducing noise.
+- Clustering and filtering ensure that only relevant segments are included in further analysis, improving classification performance.
 
 ---
 
